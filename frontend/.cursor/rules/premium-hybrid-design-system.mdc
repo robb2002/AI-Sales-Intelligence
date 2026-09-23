@@ -1,0 +1,23 @@
+---
+description: Premium Hybrid tokens, type, and component styling
+globs: frontend/**/*.{tsx,jsx,css}
+alwaysApply: false
+---
+
+# Premium Hybrid
+
+Follow `docs/UI_UX_DESIGN.md`. Enterprise light surfaces, white cards, navy structure. AI panels use `surface-ai`, an indigo left border, and an `AiLabel`. Not a game UI, not a neon dashboard, not a generic admin template.
+
+## Tokens
+
+Use semantic classes (`bg-surface`, `text-status-opportunity`, `bg-surface-ai`). No raw hex and no arbitrary spacing such as `p-[13px]`.
+
+Indigo is for AI and the active nav marker. Amber is for opportunity or attention. Green is success of a check, not "good lead". Red is failure, not a low score. The Monitor band is neutral, not red.
+
+## Icons and type
+
+`lucide-react` only, at the sizes in the design doc. Inter only. Scores use tabular numbers.
+
+## Motion and decoration
+
+No glow, gradient text, glass panels, or bouncing animation. Motion stays within the documented durations.

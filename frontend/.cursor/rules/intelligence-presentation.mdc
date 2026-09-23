@@ -1,0 +1,17 @@
+---
+description: How scores, evidence, and the four layers appear in the UI
+globs: frontend/**/*.{tsx,jsx}
+alwaysApply: false
+---
+
+# Presenting Intelligence
+
+A score is never a number alone. Render `value`, `band`, all five `factors`, and `explanation_status`. If the explanation is unavailable, show that and still show the number.
+
+Evidence on a signal or opportunity lists every source reference from the payload. The link uses `source_url` from the API. Do not build a SAM.gov or USAspending URL in the client.
+
+Label `fact`, `interpretation`, `potential_opportunity`, and `recommended_action` the way `UI_UX_DESIGN.md` specifies. Copy says "potential opportunity" and "may indicate".
+
+`advisor_status` `insufficient_evidence` uses `InsufficientEvidenceNotice`, not an error alert. `data_origin` `cached` stays visible. `date_status` `unavailable` uses the date-unavailable treatment, not a blank and not the retrieval time.
+
+Do not ship sample organizations or fake scores as defaults.

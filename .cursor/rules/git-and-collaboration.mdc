@@ -1,0 +1,28 @@
+---
+description: Feature branches, small diffs, and ownership boundaries
+alwaysApply: true
+---
+
+# Git and Collaboration
+
+Work on a feature branch. Open a pull request. Do not commit directly to the shared branch.
+
+## Focus
+
+Change only the files the task needs. Do not reformat, rename, or refactor unrelated code in the same change.
+
+Keep a pull request to one phase concern so another developer can review it quickly.
+
+## Ownership
+
+Developer 1 owns `frontend/`. Developer 2 owns API routes, services, repositories, scoring, and migrations. Developer 3 owns ingestion, AI, RAG, and the scheduler. Do not edit another owner's area without saying so first.
+
+Integrate through `docs/API_CONTRACT.md` and `docs/DATABASE_DESIGN.md`, not by reading each other's private helpers.
+
+## Secrets
+
+Do not commit `.env`, API keys, Clerk secrets, or SAM.gov keys. Example files contain placeholders only.
+
+## Architecture notes
+
+If a change alters a boundary, a table, or an endpoint, update the owning document in the same change after the conflict protocol allows it. Do not leave the decision only in the code.

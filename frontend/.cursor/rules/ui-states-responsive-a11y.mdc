@@ -1,0 +1,17 @@
+---
+description: Loading, empty, error, responsive layout, and accessibility basics
+globs: frontend/**/*.{tsx,jsx}
+alwaysApply: false
+---
+
+# States, Responsive, Accessibility
+
+Every data view implements loading, empty, error, and populated. Use skeletons that match the real layout. Do not replace already loaded data with a skeleton on refresh.
+
+Empty copy distinguishes "nothing collected" from "nothing matched". A zero dashboard is zeros and empty arrays, not placeholder charts.
+
+Map API errors: 401 session expired, 403 no access or no role, 404 not found, 429 tells the user when to retry, 500 a short message and no stack trace. A failed source on a scan is scan data, not a page crash.
+
+Follow `docs/UI_UX_DESIGN.md` §38. Stack columns as specified. Never hide the score, band, evidence entry, AI label, or cached marker to make a layout fit.
+
+Accessibility: visible focus, keyboard use, labels on inputs, `aria-label` on icon-only buttons, text as well as color, respect `prefers-reduced-motion`.

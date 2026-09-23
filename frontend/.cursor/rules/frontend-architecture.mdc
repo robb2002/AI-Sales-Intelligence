@@ -1,0 +1,38 @@
+---
+description: React, Vite, Tailwind, Zustand, TanStack Query, and the API client
+globs: frontend/**/*.{ts,tsx,js,jsx,css}
+alwaysApply: false
+---
+
+# Frontend Architecture
+
+Read `frontend/AGENTS.md`. Stack: React, Vite, Tailwind, Zustand, TanStack Query, Recharts, `lucide-react`, Clerk.
+
+## State
+
+Server data lives in TanStack Query. Zustand holds UI state only. Do not copy opportunities or signals into a store.
+
+## API
+
+One client module per resource. Paths and types match `docs/API_CONTRACT.md`. Attach the Clerk bearer token there, not in components.
+
+```tsx
+// BAD — invented field, server data copied into the store
+store.setScore(data.score_value)
+
+// GOOD — contract field, query is the source of truth
+const { data, isLoading, error } = useQuery({
+  queryKey: ['opportunity', id],
+  queryFn: () => getOpportunity(id),
+})
+```
+
+A 401 returns the user to `/login`. A 403 for a missing role shows the no-role page.
+
+## Components
+
+Use the names in `docs/UI_UX_DESIGN.md` §40. Reuse them. Do not create a second score badge or evidence card.
+
+## Do not
+
+Add a UI library or a second fetch library. Do not write tests unless asked. Do not import backend code.

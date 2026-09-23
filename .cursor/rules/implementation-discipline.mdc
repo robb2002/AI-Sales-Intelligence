@@ -1,0 +1,28 @@
+---
+description: Phase order, manual validation, and what to cut
+alwaysApply: true
+---
+
+# Implementation Discipline
+
+Follow `docs/IMPLEMENTATION_PLAN.md`. Do not start a later phase because it looks small.
+
+## Before moving on
+
+Run that phase's manual validation. If a check fails, fix it before the next phase. Do not add test files unless the user asks. Validation here is manual.
+
+## Killer path first
+
+Organization, public document, validated signal, correlation, opportunity, rules score, evidence, Advisor. Dashboard, filters, IPEDS, USAspending, Scan All, and charts wait until that path works.
+
+## Leave open until validated
+
+Do not close these by changing the architecture: the first two organization names, the SAM.gov production path, the real SAM.gov quota, the LLM and embedding model, the hosting target, and live scan duration. The 10-request SAM.gov cap stays a safeguard until the issued key's quota is verified.
+
+## When blocked
+
+Reuse a document that was really fetched. Do not invent a notice, a URL, or a vector dimension. Stop SAM.gov calls at the application cap of 10 requests per 24 hours. That cap is not SAM.gov's official quota. If `robots.txt` disallows a page, skip it.
+
+## Simplicity
+
+Prefer the repository and service the design already names. Do not add a helper framework, a generic plugin system, or a cache layer for a few dozen rows.

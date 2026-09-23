@@ -1,0 +1,23 @@
+---
+description: Rules compute the score; the model only explains it
+globs: backend/**/scoring/**/*.py
+alwaysApply: false
+---
+
+# Hybrid Scoring
+
+`docs/AI_RAG_DESIGN.md` §10 is the formula. Weight version `v1`: procurement 30, related signal strength 25, assessment/EdTech 20, recency 15, source reliability 10. Bands: high 75–100, medium 50–74, low 25–49, monitor 0–24.
+
+The scoring function is pure. It does not import the AI service, read the network, or let the model pick `value`.
+
+```python
+# BAD
+value = int(await ai.complete("score this 0-100"))
+
+# GOOD
+value, factors = score_opportunity(inputs, weights=WEIGHTS_V1)
+```
+
+Persist the five points, the version, and the total. Then ask the model to explain that total. If the prose names a different integer, do not store the prose. Set `explanation_status` to `unavailable` and keep the number.
+
+One opportunity per organization. Dedup before correlation so copies do not inflate related-signal strength. Do not create an opportunity from one signal.

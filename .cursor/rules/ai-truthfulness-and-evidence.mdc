@@ -1,0 +1,26 @@
+---
+description: No fabricated facts, URLs, scores, or certainty about procurement
+alwaysApply: true
+---
+
+# Truthfulness and Evidence
+
+The product is trustworthy only if every claim can be opened.
+
+## Never fabricate
+
+Organizations, notices, awards, dates, vendors, leadership changes, sources, URLs, snippets, or scores. Not in code, docs, seeds, or UI placeholders. A missing value is `null` with `date_status` `unavailable`, or an explicit empty state.
+
+## Four layers
+
+`fact`, `interpretation`, `potential_opportunity`, `recommended_action`. Do not present an interpretation as a fact or a potential opportunity as a certain deal. Do not write that an RFP will happen.
+
+## Evidence
+
+A fact cites stored evidence: source name, stored URL, date or unavailable, verbatim snippet, relationship. The model does not invent a URL. An insight with no evidence is not stored and not shown.
+
+If evidence is insufficient, say so. Do not fill the gap from model knowledge.
+
+## Scores
+
+Rules compute the 0–100 score and the five factors (`v1` until a new version is approved). The model only explains that stored number. The UI shows both.

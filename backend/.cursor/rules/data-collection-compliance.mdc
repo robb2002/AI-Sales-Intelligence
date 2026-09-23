@@ -1,0 +1,15 @@
+---
+description: Only approved public sources, with robots and rate limits
+globs: backend/**/ingestion/**/*.py
+alwaysApply: false
+---
+
+# Data Collection
+
+Call only sources and endpoints in `docs/DATA_SOURCES.md`. SAM.gov Get Opportunities v2, the four listed USAspending v2 routes, IPEDS files, and website URLs that already have a row in §5.3.
+
+Do not add a third-party API. Do not guess a SAM.gov or USAspending deep link while it is `NEEDS VERIFICATION`. Do not put `SAM_GOV_API_KEY` in a stored evidence URL.
+
+Honor `robots.txt`, the five-second gap on a website host, and the application cap of 10 SAM.gov requests per 24 hours. That cap is a safeguard until the issued key's quota is verified. It is not SAM.gov's official quota. A 429 or a robots disallow stops that source. It does not switch to scraping.
+
+IPEDS is reference data on the organization. It is not a signal. An empty fetch is success with no new signals. A failed source is recorded and the others continue.

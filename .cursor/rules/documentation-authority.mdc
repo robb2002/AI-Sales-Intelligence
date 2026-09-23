@@ -1,0 +1,25 @@
+---
+description: Approved docs win over code, and conflicts are not edited silently
+alwaysApply: true
+---
+
+# Documentation Authority
+
+When code and a document disagree, the document wins.
+
+Order: `AGENTS.md`, then `docs/PRODUCT_PRD.md`, `docs/TECHNICAL_PRD.md`, `docs/DATA_SOURCES.md`, `docs/DATABASE_DESIGN.md`, `docs/AUTHENTICATION.md`, `docs/API_CONTRACT.md`, `docs/AI_RAG_DESIGN.md`, `docs/UI_UX_DESIGN.md`, `docs/IMPLEMENTATION_PLAN.md`, then code.
+
+## Conflict protocol
+
+Do not silently change an approved decision.
+
+1. Name the document and the statement.
+2. Say why the conflict matters.
+3. Propose the smallest change.
+4. Wait for approval before editing the source document.
+
+Then update anything downstream so the docs still agree.
+
+## Do not drift
+
+Do not add a feature, source, column, or endpoint in a code change that the docs do not already allow. A meaningful architecture change is written into the owning document first.

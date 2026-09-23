@@ -1,0 +1,29 @@
+---
+description: FastAPI routers, services, repositories, validation, and errors
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Backend Architecture
+
+Read `backend/AGENTS.md`. Routes call services. Services call repositories. Repositories are the only SQL.
+
+## Responses
+
+Return the shapes in `docs/API_CONTRACT.md`. Validate input with Pydantic. Reject unknown enum values with 400 `VALIDATION_ERROR`. Use the shared error envelope for 401, 403, 404, 429, and 500.
+
+Do not add a field the contract does not list. Do not drop `date_status`, `explanation_status`, or `data_origin`.
+
+## Auth
+
+A dependency verifies the Clerk token, then loads `app_users.role`. Protected routers use it by default. `GET /api/v1/health` is the exception. Do not hash passwords or issue JWTs.
+
+Both `SALES_REP` and `SALES_MANAGER` pass. Do not add an organization owner filter.
+
+## Scans
+
+`POST` scan returns 202, or 200 with the existing run when one is already active. Do not start a second run. Poll state lives in `scan_runs`, not in memory only.
+
+## Do not
+
+Import a vendor LLM SDK from a route or service. Do not create test files unless asked. Keep the module boring and direct.
