@@ -383,15 +383,29 @@ A COMPETITOR organization, when one is tracked, uses that company's own official
 
 ### 5.2 How a site is validated
 
-All of these must be true before the URL is written into §5.3 and before any collector runs:
+All of these must be true before the URL is written into §5.3 and before any **content collector** runs:
 
 1. The page loads without a login, a paywall, or a CAPTCHA.
 2. The site identifies the organization by its official name.
 3. `robots.txt` for that host does not disallow the specific path we will fetch.
 4. The path is a bounded section (news, leadership, board, or technology), not the whole host and not a search-all crawl.
-5. A human records the URL, the section, the signal types that section might hold, and the date checked.
+5. A human records the URL, the section, the signal types that section might hold, and the date checked — **or**, for MVP discovery-only Scan All (§5.2a), the backend records an equivalent validation result into `organization_sources`.
 
-Until those five are recorded, the website is not an approved source. The list below is empty on purpose.
+Until those five are recorded for **collection**, the URL is not an approved collection source in §5.3. Discovery storage (§5.2a) does not by itself authorize HTML fetch for signal extraction.
+
+### 5.2a MVP discovery-only Scan All (interim)
+
+**Does not replace §5.3 for content collection.** Full pipeline collection still requires §5.3 (or an explicit later decision).
+
+For the interim demo slice:
+
+1. Scan All / dashboard "Scan Now" loads every organization with `tracking_status = active`.
+2. The backend fetches the official homepage and collects same-domain links (deterministic allowlist), plus any previously approved `organization_sources` URLs.
+3. A configured LLM adapter may **select and classify** only from that allowlist. The LLM must not invent URLs.
+4. The backend **must** validate each candidate: URL syntax, HTTP accessibility (safe redirects, with one retry on transient errors), final host on the official domain or subdomain, public access, and `robots.txt` for the path.
+5. Only candidates that pass are stored as `organization_sources` with `status = approved`. Upsert is on `(organization_id, url)` — no duplicates. Previously approved URLs are not demoted to rejected on transient network errors.
+6. The LLM is never the final authority. Invented or third-party URLs are dropped before validation.
+7. Content ingestion, chunks, embeddings, and signals are **out of this slice**.
 
 ### 5.3 Approved website register
 

@@ -467,3 +467,7 @@ These six items stay open on purpose. Resolve them during implementation and val
 6. **Live scan duration.** Measure the real end-to-end scan during implementation. Do not set an artificial performance target before that measurement exists (`PRODUCT_PRD.md` Q8).
 
 Already settled, and not reopened by the list above: store only fetched URLs, and create a potential opportunity only at two validated signals of different types, one within 90 days, and a rules score of 50 or higher.
+
+### Interim MVP note (discovery-only Scan All)
+
+Before full Phase 4 Scan Now, the dashboard Scan Now control may run **discovery-only** Scan All for `tracking_status = active` organizations: LLM proposes official-domain candidates, backend validates, results upsert into `organization_sources`. Full collect → extract → score remains the plan end state and is added in later slices without replacing this table.

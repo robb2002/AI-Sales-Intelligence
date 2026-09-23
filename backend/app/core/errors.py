@@ -62,6 +62,11 @@ class NotFoundError(AppError):
         super().__init__(message, {"resource": resource})
 
 
+class ValidationAppError(AppError):
+    status_code = 400
+    code = "VALIDATION_ERROR"
+    message = "The request is not valid."
+
 def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
