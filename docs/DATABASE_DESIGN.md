@@ -104,9 +104,11 @@ Maps a Clerk identity to exactly one application role (`AUTHENTICATION.md` §9).
 |---|---|---|---|
 | `organization_id` | uuid | no | Primary key |
 | `name` | text | no | Stored official name. The model must not rename it |
-| `organization_type` | text | no | API enum |
+| `organization_type` | text | no | API enum: `university`, `college`, `k12_district`, `public_sector_education` |
+| `market_role` | text | no | `target` or `competitor` (`DATA_SOURCES.md` target data model) |
+| `tracking_status` | text | no | `active` or `inactive`. MVP scans use `active` only |
 | `state_code` | char(2) | yes | USPS |
-| `website_url` | text | yes | Official site once `DATA_SOURCES.md` §5.3 validates it |
+| `website_url` | text | yes | Official site root URL (for example `https://asu.edu`). Deep pages wait for `DATA_SOURCES.md` §5.3 |
 | `ipeds_unit_id` | text | yes | Unique when present. Null for K-12 and agencies |
 | `ipeds_collection_year` | text | yes | |
 | `ipeds_release` | text | yes | `final` or `provisional` |
@@ -117,11 +119,13 @@ Maps a Clerk identity to exactly one application role (`AUTHENTICATION.md` §9).
 | `created_at` | timestamptz | no | |
 | `updated_at` | timestamptz | no | |
 
-**Indexes:** `organization_type`, `state_code`, unique `ipeds_unit_id` where not null, unique `website_url` where not null.
+**Indexes:** `organization_type`, `market_role`, `tracking_status`, `state_code`, unique `ipeds_unit_id` where not null, unique `website_url` where not null.
 
-**Constraints:** type check. `ipeds_release` check when not null. `ipeds_attributes` is not evidence and is never given a signal type.
+**Constraints:** `organization_type` check. `market_role` check. `tracking_status` check. `ipeds_release` check when not null. `ipeds_attributes` is not evidence and is never given a signal type.
 
 `signal_count`, `opportunity_count`, and `last_scanned_at` in the API are queries, not stored counters.
+
+Country is not a column. The product is United States only (`AGENTS.md` §3).
 
 ---
 
@@ -141,6 +145,34 @@ One row per approved origin. Website entries are added only after `DATA_SOURCES.
 | `updated_at` | timestamptz | no | |
 
 **Constraints:** `source_kind` check. `reliability_label` null or one of the two scored labels in `DATA_SOURCES.md` §6.
+
+Website **page** URLs discovered during MVP Scan All are **not** stored as many `sources` rows. They live in `organization_sources` (§5a). The registry row `website:<organization_id>` remains the origin entry for later document collection.
+
+---
+
+## 5a. organization_sources
+
+Validated official **page** URLs for a tracked organization. Used by MVP discovery-only Scan All. Content fetch (Phase 4) reads approved rows here; it does not invent URLs.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `organization_source_id` | uuid | no | Primary key |
+| `organization_id` | uuid | no | Foreign key to `organizations` |
+| `url` | text | no | Final validated URL after redirects. Never an LLM-only string |
+| `source_title` | text | yes | Short title from discovery or the page |
+| `page_category` | text | no | Page category for discovery UI only — not a new signal type. Values: `procurement`, `technology`, `digital_learning`, `assessment`, `funding`, `leadership`, `strategic_initiative`, `partnership` |
+| `status` | text | no | `approved` or `rejected` |
+| `is_official` | boolean | no | True when the final host is the org domain or a subdomain |
+| `rejection_reason` | text | yes | Set when `status` is `rejected` |
+| `last_validated_at` | timestamptz | no | Last successful validation attempt |
+| `created_at` | timestamptz | no | |
+| `updated_at` | timestamptz | no | |
+
+**Indexes:** `(organization_id)`, `(status)`, unique `(organization_id, url)`.
+
+**Constraints:** `page_category` check. `status` check. `url` not empty.
+
+Re-running discovery upserts on `(organization_id, url)` and refreshes `source_title`, `page_category`, `status`, `last_validated_at`. It does not insert duplicates.
 
 ---
 
@@ -392,6 +424,10 @@ Batch status in the API is derived from child runs, not stored.
 | `signals_updated` | integer | no | Default 0 |
 | `opportunities_created` | integer | no | Default 0 |
 | `opportunities_updated` | integer | no | Default 0 |
+| `candidates_found` | integer | no | Default 0. MVP discovery count |
+| `sources_approved` | integer | no | Default 0. MVP discovery count |
+| `sources_rejected` | integer | no | Default 0. MVP discovery count |
+| `error_detail` | text | yes | Safe failure summary. Never secrets |
 | `started_at` | timestamptz | yes | |
 | `finished_at` | timestamptz | yes | |
 | `created_at` | timestamptz | no | |
@@ -509,4 +545,4 @@ The database holds the foreign keys and the checks above. These rules stay in th
 | B2 | ANN index | **Deferred.** Exact search until volume says otherwise |
 | B3 | `evidence_ids` as `uuid[]` | **Chosen** to avoid a junction table. The application must reject unknown ids. A junction is only worth adding if that check is skipped |
 | B4 | IPEDS column names inside `ipeds_attributes` | Still `NEEDS VERIFICATION` in `DATA_SOURCES.md` D5. The jsonb array can hold them without a schema change |
-| B5 | Named organizations and website `sources` rows | **Decided 2026-09-23.** The first load is two TARGET organizations, after real evidence. Rows stay empty until `DATA_SOURCES.md` §5.3 is filled |
+| B5 | Named organizations and website `sources` rows | **Updated 2026-09-23.** Ten TARGET organizations are seeded. Two are `active` (ASU, UCF). Page URLs from MVP discovery land in `organization_sources` (§5a). Registry `sources` website rows and `DATA_SOURCES.md` §5.3 collection allowlist remain for content fetch |

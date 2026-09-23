@@ -487,6 +487,7 @@ new collector (`FR-DATA-02`, `FR-DATA-04`).
 | 1 | Official API | SAM.gov, USAspending.gov — structured, documented, preferred |
 | 2 | Public data file / feed | IPEDS reference data (`FR-DATA-07`: enrichment only) |
 | 3 | Requests + BeautifulSoup | Static pages on approved official organization websites |
+| 3a | `httpx` (async) | Async outbound HTTP for URL validation and the Azure OpenAI adapter (AD-07). Does not replace Requests/BeautifulSoup for HTML collection |
 | 4 | Playwright | Only where a page genuinely requires JavaScript rendering |
 
 Playwright is a last resort because it multiplies the deployment footprint (a browser binary in
@@ -692,15 +693,18 @@ Names and purposes only; values are never recorded in this repository.
 | `CLERK_SECRET_KEY` | Backend | Verifies Clerk session tokens. Never sent to the browser |
 | `CLERK_PUBLISHABLE_KEY` | Frontend | Clerk client key, exposed as `VITE_CLERK_PUBLISHABLE_KEY` |
 | `CORS_ALLOWED_ORIGINS` | Backend | Permitted frontend origins |
-| `LLM_PROVIDER` | Backend | Selects the adapter (AD-07) |
-| `LLM_MODEL` | Backend | Model identifier for the selected provider |
-| `LLM_API_KEY` | Backend | Provider credential |
+| `LLM_PROVIDER` | Backend | Selects the adapter (AD-07). MVP discovery uses `azure_openai` when configured |
+| `LLM_MODEL` | Backend | Model or Azure deployment name for the selected provider |
+| `LLM_API_KEY` | Backend | Provider credential (Azure OpenAI key when `LLM_PROVIDER=azure_openai`) |
 | `LLM_TIMEOUT_SECONDS` | Backend | Bound on model calls |
+| `AZURE_OPENAI_ENDPOINT` | Backend | Azure OpenAI resource endpoint when using `azure_openai` |
+| `AZURE_OPENAI_API_VERSION` | Backend | Azure OpenAI API version string |
 | `EMBEDDING_MODEL` | Backend | Open-source embedding model identifier |
 | `EMBEDDING_API_URL` | Backend | Only if hosted embeddings are chosen (§5.4) |
 | `SAM_GOV_API_KEY` | Backend | SAM.gov data service credential |
 | `SCAN_SCHEDULE_CRON` | Backend | Scheduled sweep cadence (§9) |
 | `SCAN_MAX_CONCURRENT_SOURCES` | Backend | Politeness bound (§7.4) |
+| `SCAN_ORG_CONCURRENCY` | Backend | Max concurrent organization discovery runs inside one Scan All batch |
 | `HTTP_USER_AGENT` | Backend | Honest client identification (§8.3) |
 | `ENABLE_FALLBACK_DATASET` | Backend | Whether cached fallback may be read (§7.6) |
 | `VITE_API_BASE_URL` | Frontend | Backend base URL, build-time |

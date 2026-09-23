@@ -61,7 +61,13 @@ User-facing prose that the AI produced or that quotes a source includes `content
 
 **Scan status:** `queued`, `running`, `succeeded`, `partial`, `failed`, `interrupted`
 
-**Scan stage:** `collecting`, `extracting`, `validating`, `deduplicating`, `correlating`, `scoring`
+**Scan stage (full pipeline, later phases):** `collecting`, `extracting`, `validating`, `deduplicating`, `correlating`, `scoring`
+
+**Scan stage (MVP discovery-only):** `discovering`, `validating_sources`, `saving_sources`
+
+**Organization page category** (discovery UI only; not a signal type): `procurement`, `technology`, `digital_learning`, `assessment`, `funding`, `leadership`, `strategic_initiative`, `partnership`
+
+**Organization source status:** `approved`, `rejected`
 
 **Source result:** `succeeded`, `failed`, `skipped`
 
@@ -437,6 +443,41 @@ This is the only organization search. There is no `/search` route.
 
 Signals and opportunities for the organization are not inlined. The client calls §7.1 and §8.1 with `organization_id`.
 
+### 6.3 List organization page sources
+
+| | |
+|---|---|
+| Method / path | `GET /api/v1/organizations/{organization_id}/sources` |
+| Auth | Bearer |
+| Roles | Both |
+
+**Query:** optional `status` (repeatable: `approved`, `rejected`). Optional pagination §4. Default returns all statuses.
+
+**200:** page of organization source rows:
+
+```json
+{
+  "data": [
+    {
+      "organization_source_id": "<uuid>",
+      "organization_id": "<uuid>",
+      "url": "https://example.edu/path",
+      "source_title": "<title or null>",
+      "page_category": "technology",
+      "status": "approved",
+      "is_official": true,
+      "rejection_reason": null,
+      "last_validated_at": "2026-09-23T12:00:00Z"
+    }
+  ],
+  "total": 0,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+**Errors:** 401, 403, 404 if the organization does not exist.
+
 ---
 
 ## 7. Signals
@@ -559,6 +600,10 @@ If a scan for that organization is already `queued` or `running`, the response i
 
 Any other `scope` is 400. There is no body that accepts an arbitrary URL or an untracked name.
 
+**MVP meaning of `all_tracked`:** every organization with `tracking_status = active`. Inactive seeded organizations are skipped. When another organization is set active, the same call includes it.
+
+**MVP behavior:** discovery-only — propose candidates via the LLM adapter, validate on the backend, upsert `organization_sources`. Does not fetch page bodies for signals yet.
+
 **202**
 
 ```json
@@ -570,7 +615,7 @@ Any other `scope` is 400. There is no body that accepts an arbitrary URL or an u
 }
 ```
 
-Each id is a scan for one tracked organization. Organizations that already have an active scan contribute that existing scan id. The batch does not start a second run for them.
+Each id is a scan for one **active** organization. Organizations that already have an active scan contribute that existing scan id. The batch does not start a second run for them.
 
 **Errors:** 401, 403, 429 `SCAN_RATE_LIMITED`.
 
@@ -836,9 +881,10 @@ The server never trusts a client-sent role, score, evidence URL, or organization
 | Login, logout, password, token refresh | Clerk |
 | Role assignment | A database row during the hackathon |
 | Create or edit organization, signal, or opportunity | Read-only intelligence. Changes come from scans |
-| Organization discovery from the open web | Out of MVP |
+| Unbounded open-web organization discovery (any domain) | Out of MVP |
 | CRM, email, or notification endpoints | Out of MVP |
 | A free-form URL ingest endpoint | Collection is the scan pipeline and the source register |
+| Trusting LLM-proposed URLs without backend validation | Forbidden. MVP discovery proposes; validation stores |
 | Portfolio-wide Advisor with no scope | `AI_RAG_DESIGN.md` §23 |
 
 ---

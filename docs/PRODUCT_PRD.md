@@ -499,9 +499,13 @@ conversation.
 **Requirements**
 
 - `FR-SCAN-01` — A user MUST be able to trigger a scan for a selected organization.
-- `FR-SCAN-02` — A scan MUST run the full pipeline: collect from approved sources → extract
-  signals → validate → deduplicate/cluster → correlate → generate or update opportunities →
+- `FR-SCAN-02` — A scan MUST eventually run the full pipeline: collect from approved sources →
+  extract signals → validate → deduplicate/cluster → correlate → generate or update opportunities →
   recalculate scores → produce explanations and recommended actions.
+  **MVP interim (discovery-only):** until later phases land, Scan All / dashboard Scan Now for
+  `tracking_status = active` organizations MAY complete after LLM-assisted candidate proposal,
+  backend URL validation, and persistence into `organization_sources`. Later phases add collection
+  and downstream stages without changing this requirement's end state.
 - `FR-SCAN-03` — The user MUST see that the scan is running and which stage it has reached. The
   interface MUST NOT appear frozen.
 - `FR-SCAN-04` — On completion, the user MUST see what changed: new signals, updated signals, new

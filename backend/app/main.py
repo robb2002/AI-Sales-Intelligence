@@ -56,6 +56,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        from app.services.scans import mark_interrupted_on_startup
+
+        await mark_interrupted_on_startup(create_session_factory(engine))
         yield
         await engine.dispose()
 

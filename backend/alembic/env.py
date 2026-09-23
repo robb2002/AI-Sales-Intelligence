@@ -6,7 +6,13 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
-from app.repositories import app_users  # noqa: F401  registers the table on Base.metadata
+from app.repositories import (  # noqa: F401  registers tables on Base.metadata
+    app_users,
+    organization_sources,
+    organizations,
+    scans,
+    sources,
+)
 from app.repositories.base import Base
 
 config = context.config
