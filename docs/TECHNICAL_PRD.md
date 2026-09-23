@@ -165,6 +165,9 @@ cached/fallback data carries a flag (`FR-FB-03`). These are response-shape oblig
 Vite. Environment configuration is build-time (`VITE_API_BASE_URL`). The production build is
 static files served by the frontend host. No server-side rendering.
 
+**Approved 2026-09-23.** Client routing uses React Router in declarative mode (`BrowserRouter`,
+`Routes`). No framework mode, no route loaders.
+
 ---
 
 ## 3. Backend architecture
@@ -196,7 +199,7 @@ backend/app/
     config.py             typed settings (§15)
     logging.py            structured logging setup (§14)
     errors.py             exception hierarchy + handlers (§13)
-    security.py           Clerk session verification, then app_users role lookup
+    security.py           Clerk session verification, Clerk user profile fetch, app_users upsert
   services/
     scan_orchestrator.py  drives a scan run end to end
     signal_service.py     extraction, validation, dedupe, correlation orchestration
@@ -559,6 +562,10 @@ AD-05.
 Enterprise SSO remains out of MVP. Email/password through Clerk satisfies the login method in
 `AGENTS.md` §11. Clerk itself is an approved addition to the stack (explicit decision, 2026-09-22);
 it is not a second authorization system.
+
+**Approved 2026-09-23.** FastAPI verifies the Clerk session token with PyJWT against the Clerk
+instance's JWKS, fetched with `CLERK_SECRET_KEY`. The token's `azp` must be one of
+`CORS_ALLOWED_ORIGINS`. PyJWT only verifies tokens; it never issues them.
 
 A user who authenticates in Clerk but has no role row is denied. Roles are assigned by the team
 during the hackathon, not self-selected at sign-up.

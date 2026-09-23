@@ -110,7 +110,7 @@ Remove the decisions and accounts that would otherwise stall the pipeline.
 
 - Create the Supabase project and the empty schema from `DATABASE_DESIGN.md`. Leave the vector column off until the embedding width is known, or add it in the same morning if the model is already chosen.
 - Confirm Clerk verification with `CLERK_SECRET_KEY` against a throwaway token.
-- Insert two `app_users` rows: one `SALES_REP`, one `SALES_MANAGER`.
+- Set Clerk public metadata `role` to `SALES_REP` and `SALES_MANAGER` on the two demo users. The first `/api/v1/me` call syncs each into `app_users`.
 
 ### AI/data tasks
 
@@ -131,7 +131,7 @@ Both developers can sign in as provisioned users. One SAM.gov response is stored
 - Call `GET /api/v1/health` with no token. Expect `200` and `{"status":"ok"}`.
 - Call `GET /api/v1/me` with no token. Expect `401` `AUTH_MISSING`.
 - Call it with the sales-rep Clerk token. Expect that role. Repeat for the manager.
-- Call it with a Clerk user who has no `app_users` row. Expect `403` `USER_NOT_PROVISIONED`.
+- Call it with a Clerk user who has no `publicMetadata.role`. Expect `403` `USER_NOT_PROVISIONED`.
 
 ### Integration point
 

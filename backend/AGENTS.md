@@ -20,7 +20,7 @@ Read the root `AGENTS.md` first. This file does not override it.
 
 ## Stack
 
-Python, FastAPI, Supabase PostgreSQL, pgvector, LangChain for splitting and retrieval only, a configurable LLM adapter, open-source embeddings, Requests, BeautifulSoup, APScheduler. Playwright only for a URL that `DATA_SOURCES.md` has already marked as requiring JavaScript.
+Python, FastAPI, Supabase PostgreSQL, pgvector, LangChain for splitting and retrieval only, a configurable LLM adapter, open-source embeddings, Requests, BeautifulSoup, APScheduler, PyJWT for Clerk token verification only. Playwright only for a URL that `DATA_SOURCES.md` has already marked as requiring JavaScript.
 
 No Redis, Celery, Kafka, or a second service. One process, one worker.
 
@@ -36,7 +36,7 @@ Routes validate and authorize. They contain no business rules and no SQL. Servic
 
 ## Auth
 
-Verify the Clerk bearer token, then load `SALES_REP` or `SALES_MANAGER` from `app_users`. Do not issue JWTs. Do not store passwords. Do not use Supabase Auth. Missing or bad tokens are 401. A valid user with no role is 403. Both roles may call every protected route. Do not filter rows by user.
+Verify the Clerk bearer token, then sync `publicMetadata.role` and email into `app_users`, and authorize from that row. Do not issue JWTs. Do not store passwords. Do not use Supabase Auth. Missing or bad tokens are 401. A valid user with no Clerk role metadata is 403. Both roles may call every protected route. Do not filter rows by user.
 
 `GET /api/v1/health` is the only public route.
 

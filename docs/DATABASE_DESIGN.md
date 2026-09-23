@@ -81,19 +81,20 @@ One organization has many signals, at most one opportunity, and many scan runs. 
 
 ## 3. app_users
 
-Maps a Clerk identity to exactly one application role (`AUTHENTICATION.md` §9). No password, token, email, or name.
+Maps a Clerk identity to exactly one application role (`AUTHENTICATION.md` §9). No password or token. Email and role are synced from Clerk on authenticated requests.
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
 | `user_id` | uuid | no | Primary key. API `user_id` |
-| `clerk_user_id` | text | no | Unique. API `clerk_user_id` |
+| `clerk_user_id` | text | no | Unique. API `clerk_user_id`. Clerk account id |
+| `email` | text | no | Primary email copied from Clerk |
 | `role` | text | no | `SALES_REP` or `SALES_MANAGER` |
 | `created_at` | timestamptz | no | |
 | `updated_at` | timestamptz | no | |
 
 **Indexes:** unique on `clerk_user_id`.
 
-**Constraints:** `role` check. No row is inserted on first login. A Clerk user with no row is `403 USER_NOT_PROVISIONED`.
+**Constraints:** `role` check. A row is upserted only when Clerk returns a valid `publicMetadata.role`. A Clerk user with no role metadata is `403 USER_NOT_PROVISIONED`.
 
 ---
 

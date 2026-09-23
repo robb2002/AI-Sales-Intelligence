@@ -1,7 +1,7 @@
 # Authentication and Authorization
 
-> **Status:** DRAFT — awaiting approval
-> **Version:** 0.2
+> **Status:** DRAFT — decisions of 2026-09-23 recorded (Clerk metadata provisions role into Postgres)
+> **Version:** 0.3
 > **Date:** 2026-09-23
 > **Authoring order:** 5 of 9
 > **Depends on:** `AGENTS.md`, `PRODUCT_PRD.md` §27, `TECHNICAL_PRD.md` §10 and AD-15
@@ -80,7 +80,7 @@ Clerk is the only authentication system.
 | Password reset | Yes | Never |
 | Session creation, refresh, and expiry | Yes | Never |
 | Session token issuance | Yes | The backend verifies tokens. It does not issue them |
-| User identity (Clerk user id, email, name) | Yes, source of truth | Not copied into PostgreSQL for the MVP |
+| User identity (Clerk user id, email, name) | Yes, source of identity | Email and role are copied into PostgreSQL on each successful auth sync (§6.1). Name stays in Clerk only |
 | Basic account management | Clerk Dashboard | No admin screens |
 
 Login method for the MVP is email and password through Clerk. That satisfies `AGENTS.md` §11.
@@ -100,7 +100,7 @@ FastAPI does not authenticate. It verifies that Clerk already did, then authoriz
 |---|---|
 | Verify the bearer token on every protected route | Shared dependency, not per-route custom code |
 | Read the Clerk user id from the verified token | This is the only identity key the backend trusts |
-| Load `SALES_REP` or `SALES_MANAGER` from PostgreSQL | Clerk metadata is not the role source |
+| Load `SALES_REP` or `SALES_MANAGER` from PostgreSQL after syncing from Clerk | Live authorization uses the database row. Clerk `publicMetadata.role` is the provisioning input that the backend copies into that row (§6.1) |
 | Reject missing, invalid, and expired tokens | `401`, before any database write |
 | Reject an authenticated user with no usable role | `403` |
 | Enforce the role on the operation | Even though both MVP roles currently share one permission set |
@@ -148,13 +148,15 @@ cache clear.
 After the token verifies:
 
 1. Read the Clerk user id from the verified token.
-2. Look up the application user row by that id.
-3. If no row exists, return `403` with `USER_NOT_PROVISIONED`. Do not create a row automatically.
-4. If the row exists but the role is missing or is not exactly `SALES_REP` or `SALES_MANAGER`,
-   return `403` with `USER_WITHOUT_ROLE`.
-5. If the operation's allowed roles do not include the stored role, return `403` with
+2. Load the Clerk user profile with the backend secret (email and `publicMetadata.role`).
+3. If `publicMetadata.role` is missing, return `403` with `USER_NOT_PROVISIONED`. Do not invent a role.
+4. If the role is present but is not exactly `SALES_REP` or `SALES_MANAGER`, return `403` with
+   `USER_WITHOUT_ROLE`.
+5. Upsert the application user row with `clerk_user_id`, email, and role. That row is what later
+   checks read.
+6. If the operation's allowed roles do not include the stored role, return `403` with
    `INSUFFICIENT_PERMISSION`.
-6. Otherwise run the operation. The role does not change which organizations, signals, or
+7. Otherwise run the operation. The role does not change which organizations, signals, or
    opportunities are returned (`FR-ROLE-04`).
 
 Authorization is role-based, not record-based. There is no organization ownership check.
@@ -177,19 +179,25 @@ only.
 
 ### 6.1 How a Clerk user receives a role
 
-MVP provisioning is manual. There is no admin UI, no invitation workflow, and no webhook.
+MVP provisioning is done in the Clerk Dashboard. There is no admin UI and no webhook in the app.
 
 1. Create the person in the Clerk Dashboard (or let them sign up through Clerk).
-2. Insert one application user row: internal id, Clerk user id, role, `created_at`, `updated_at`.
-3. Until that row exists with a valid role, the API returns `403` even though Clerk sign-in
-   succeeded.
+2. Set **public metadata** on that user to exactly:
+   ```json
+   { "role": "SALES_REP" }
+   ```
+   or `{ "role": "SALES_MANAGER" }`. No other key or value grants access.
+3. On the next authenticated API call, FastAPI verifies the session token, reads that metadata and
+   the primary email from Clerk, and upserts `app_users` with `clerk_user_id`, `email`, and `role`.
+4. Until a valid role exists in Clerk public metadata, the API returns `403` even though Clerk
+   sign-in succeeded.
 
-The team assigns the role in the database during the hackathon. The user cannot choose or change
-their own role. Changing a role means updating that row. It does not mean editing Clerk.
+Sign-up alone does not grant a role. The team sets metadata in Clerk on purpose. The user cannot
+choose or change their own role through the product. Changing a role means editing Clerk public
+metadata; the next successful API sync updates the database row.
 
-Demo accounts follow the same path: one Clerk user with a `SALES_REP` row, one with a
-`SALES_MANAGER` row, created before the demonstration. The email addresses are not written into
-this repository.
+Demo accounts: one Clerk user with `role: SALES_REP`, one with `role: SALES_MANAGER`. Email
+addresses are not written into this repository.
 
 ### 6.2 Permission matrix
 
@@ -225,7 +233,7 @@ the token. The sidebar shows the role label from the current-user response so th
 which role they hold. That label does not change the data on screen.
 
 The current-user call is `GET /api/v1/me` in `API_CONTRACT.md` §2.1. The response includes
-`user_id`, `clerk_user_id`, and `role`. The frontend does not invent another path.
+`user_id`, `clerk_user_id`, `email`, and `role`. The frontend does not invent another path.
 
 ---
 
@@ -252,24 +260,26 @@ not acceptable.
 
 ## 9. User and application data
 
-Clerk is the source of truth for identity and credentials. PostgreSQL is the source of truth for
-application data, including the role.
+Clerk is the source of truth for identity, credentials, and the role **value assigned in the
+Dashboard** (`publicMetadata.role`). PostgreSQL stores the synced application copy used for
+authorization and for `GET /api/v1/me`.
 
-The application user row stores only:
+The application user row stores:
 
 | Field | Required | Notes |
 |---|---|---|
-| Internal id | Yes | Primary key used by our tables if a later feature must reference a user |
-| Clerk user id | Yes | Unique. The join key from a verified token. Never a password, never an email |
-| Application role | Yes, once provisioned | `SALES_REP` or `SALES_MANAGER` only |
+| Internal id | Yes | Primary key. API `user_id` |
+| Clerk user id | Yes | Unique. API `clerk_user_id`. Account id from Clerk |
+| Email | Yes | Primary email copied from Clerk on sync. Not a login credential |
+| Application role | Yes, once provisioned | `SALES_REP` or `SALES_MANAGER` only, copied from Clerk metadata |
 | `created_at` | Yes | Audit |
 | `updated_at` | Yes | Audit |
 
-Not stored: password, password hash, session token, Clerk secret, refresh token, or a copy of the
-Clerk profile. The frontend reads display name and email from the Clerk session when it needs them.
+Not stored: password, password hash, session token, Clerk secret, or refresh token. Display name
+may still be read from the Clerk session on the client when needed.
 
-No row is created on first login. Automatic provisioning would let anyone who can sign up in Clerk
-become a user of the product. The hackathon team inserts rows on purpose.
+A row is created or updated only after Clerk returns a valid role. A Clerk account with no
+`publicMetadata.role` never receives a row from that failed call.
 
 `DATABASE_DESIGN.md` names the table and the constraints. The unique Clerk user id and the closed
 role set are required there.
@@ -291,8 +301,8 @@ Auth failures use the error envelope from `TECHNICAL_PRD.md` §13:
 | No `Authorization` header, or empty bearer token | 401 | `AUTH_MISSING` | Authentication is required |
 | Token is malformed, unsigned, or not issued by this Clerk instance | 401 | `AUTH_INVALID` | Authentication failed |
 | Token is expired | 401 | `AUTH_EXPIRED` | Sign in again |
-| Token is valid and no application user row exists | 403 | `USER_NOT_PROVISIONED` | Signed in, no access granted yet |
-| Token is valid, row exists, role is missing or not one of the two codes | 403 | `USER_WITHOUT_ROLE` | Signed in, no application role |
+| Token is valid and Clerk public metadata has no `role` | 403 | `USER_NOT_PROVISIONED` | Signed in, no access granted yet |
+| Token is valid, role is present but not one of the two codes | 403 | `USER_WITHOUT_ROLE` | Signed in, no application role |
 | Token is valid, role is valid, operation does not allow that role | 403 | `INSUFFICIENT_PERMISSION` | Authenticated, not allowed |
 
 `401` means we do not know an authenticated user. `403` means we do, and they may not proceed.
@@ -314,7 +324,8 @@ because the caller already proved who they are.
 | Passwords | Never received by FastAPI. Never hashed by us. Never written to PostgreSQL |
 | Custom password hashing | Not implemented |
 | Authorization | Server-side after verification. The UI hiding a control is irrelevant (`FR-ROLE-02`) |
-| Role source | PostgreSQL only. A role claim inside the token is ignored if it disagrees with the row |
+| Role source for live checks | PostgreSQL row after sync from Clerk. A client-sent role is ignored |
+| Role assignment | Clerk Dashboard `publicMetadata.role` only. Sign-up does not set it |
 | Session expiry | An expired token is `401 AUTH_EXPIRED`. The frontend returns the user to `/login`. There is no silent continuation |
 | Logout | Clerk invalidates the session. The client cache is cleared. Old tokens fail verification |
 | Unauthorized access | `403` as in §10. The body contains no intelligence data |
@@ -354,8 +365,8 @@ Minimum configuration:
    development database (`TECHNICAL_PRD.md` §26).
 2. Frontend `.env`: `VITE_CLERK_PUBLISHABLE_KEY=<development publishable key>`.
 3. Backend `.env`: `CLERK_SECRET_KEY=<development secret key>`.
-4. Two application user rows in the shared database, one role each, using the Clerk user ids from
-   that same development instance.
+4. Two demo Clerk users with `publicMetadata.role` set to `SALES_REP` and `SALES_MANAGER`. The first
+   successful `/api/v1/me` call syncs each into `app_users`.
 
 Each developer copies `.env.example` to an untracked `.env`. Keys are not pasted into source, into
 `AGENTS.md`, or into chat that gets committed.
@@ -374,7 +385,7 @@ in the host's environment configuration. Development keys are not reused.
 |---|---|
 | Keys | Production `CLERK_SECRET_KEY` only on the backend host. Production publishable key only as the frontend build variable |
 | Instances | Development and demo Clerk instances stay separate, matching the separate demo database |
-| Users | Demo `SALES_REP` and `SALES_MANAGER` rows exist before the demonstration. No self-service role grant |
+| Users | Demo `SALES_REP` and `SALES_MANAGER` metadata exists in Clerk before the demonstration. No self-service role grant |
 | HTTPS | Required. Clerk and the hosts provide it |
 | Sign-in availability | If Clerk is unreachable, users cannot sign in and API calls fail closed with `401` |
 | Secrets in logs and errors | Forbidden (§11) |
@@ -391,11 +402,11 @@ Required for the hackathon:
 2. Logout through Clerk, with the client cache cleared.
 3. An authenticated Clerk session.
 4. A Clerk user id available to FastAPI after verification.
-5. The `SALES_REP` role.
-6. The `SALES_MANAGER` role.
+5. The `SALES_REP` role, assigned in Clerk public metadata and synced into PostgreSQL.
+6. The `SALES_MANAGER` role, same path.
 7. Protected frontend routes that redirect when signed out.
 8. Protected FastAPI routes that reject missing or bad tokens.
-9. Backend role authorization using the PostgreSQL role row.
+9. Backend role authorization using the PostgreSQL role row after Clerk sync.
 
 Both roles can see all tracked organizations. No assignment filter.
 
@@ -417,8 +428,8 @@ These are not part of the hackathon. They must not be built because they are nea
 | Social-login customization | Email/password is enough |
 | FastAPI-issued JWTs | Rejected |
 | Supabase Auth and Row Level Security as the auth system | Rejected. AD-05 stands |
-| Clerk webhooks to auto-provision users | Extra moving part. Manual rows are enough for 10–20 organizations and a handful of users |
-| Storing the role in Clerk public metadata as the source of truth | The role would then live outside PostgreSQL. The database row is the source of truth |
+| Clerk webhooks to auto-provision users | Extra moving part. Metadata + sync on request is enough for the MVP |
+| Treating Clerk metadata as the live permission without writing `app_users` | FastAPI must authorize from the database row after sync. Metadata alone is not enough |
 
 ---
 
@@ -427,7 +438,7 @@ These are not part of the hackathon. They must not be built because they are nea
 | # | Question | Status |
 |---|---|---|
 | A1 | FastAPI-native auth or Supabase Auth? | **Decided.** Neither. Clerk authenticates. FastAPI authorizes. PostgreSQL stores the role |
-| A2 | Where is the role stored? | **Decided.** Application user row in PostgreSQL, keyed by Clerk user id. Not in Clerk metadata |
-| A3 | Does sign-up grant a role? | **Decided.** No. A Clerk account with no role row receives `403 USER_NOT_PROVISIONED` |
+| A2 | Where is the role stored? | **Decided 2026-09-23.** Assigned in Clerk `publicMetadata.role`. Synced into PostgreSQL `app_users` on authenticated requests. Live authorization uses the database row |
+| A3 | Does sign-up grant a role? | **Decided.** No. A Clerk account with no valid `publicMetadata.role` receives `403 USER_NOT_PROVISIONED` |
 | A4 | Which email addresses are the two demo accounts? | Left out of the repository on purpose. Create them in the Clerk Dashboard before the demo |
-| A5 | Current-user path and schema | **Decided.** `GET /api/v1/me` returns `user_id`, `clerk_user_id`, and `role` (`API_CONTRACT.md` §2.1). `GET /api/v1/health` is the only public route |
+| A5 | Current-user path and schema | **Decided.** `GET /api/v1/me` returns `user_id`, `clerk_user_id`, `email`, and `role` (`API_CONTRACT.md` §2.1). `GET /api/v1/health` is the only public route |

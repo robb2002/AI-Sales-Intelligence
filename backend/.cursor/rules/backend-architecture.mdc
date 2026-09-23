@@ -16,7 +16,7 @@ Do not add a field the contract does not list. Do not drop `date_status`, `expla
 
 ## Auth
 
-A dependency verifies the Clerk token, then loads `app_users.role`. Protected routers use it by default. `GET /api/v1/health` is the exception. Do not hash passwords or issue JWTs.
+A dependency verifies the Clerk token, syncs role and email from Clerk into `app_users`, then authorizes from that row. Protected routers use it by default. `GET /api/v1/health` is the exception. Do not hash passwords or issue JWTs.
 
 Both `SALES_REP` and `SALES_MANAGER` pass. Do not add an organization owner filter.
 

@@ -17,7 +17,7 @@ Must-have beats should-have beats nice-to-have. Cut in the order that plan lists
 
 React, Vite, Tailwind, Zustand, TanStack Query, Recharts, `lucide-react`, Clerk on the frontend. FastAPI, Supabase PostgreSQL, pgvector, LangChain where the AI design allows it, Requests, BeautifulSoup, APScheduler on the backend.
 
-Do not add a dependency, queue, cache, or service that `docs/TECHNICAL_PRD.md` does not name. Clerk and `lucide-react` are already approved.
+Do not add a dependency, queue, cache, or service that `docs/TECHNICAL_PRD.md` does not name. Clerk, `lucide-react`, React Router, and PyJWT (Clerk token verification only) are already approved.
 
 ## Simplicity
 

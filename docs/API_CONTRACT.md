@@ -78,8 +78,8 @@ Clerk has already signed the user in. These rules are from `AUTHENTICATION.md` �
 | Missing or empty bearer token | 401 | `AUTH_MISSING` |
 | Token invalid or not from this Clerk instance | 401 | `AUTH_INVALID` |
 | Token expired | 401 | `AUTH_EXPIRED` |
-| Valid token, no application user row | 403 | `USER_NOT_PROVISIONED` |
-| Valid token, role missing or not one of the two codes | 403 | `USER_WITHOUT_ROLE` |
+| Valid token, Clerk public metadata has no `role` | 403 | `USER_NOT_PROVISIONED` |
+| Valid token, role present but not one of the two codes | 403 | `USER_WITHOUT_ROLE` |
 | Valid role, operation not allowed for that role | 403 | `INSUFFICIENT_PERMISSION` |
 
 A 401 or 403 body contains no organizations, signals, scores, or evidence.
@@ -102,17 +102,18 @@ There is no login, logout, or refresh endpoint.
 {
   "user_id": "<uuid>",
   "clerk_user_id": "<clerk id>",
+  "email": "<primary email from Clerk>",
   "role": "SALES_REP"
 }
 ```
 
-`role` is the PostgreSQL value, not a Clerk metadata claim.
+`role` and `email` are the values stored in PostgreSQL after the Clerk sync on this request. The role must match Clerk `publicMetadata.role` for that user.
 
 **Errors:** 401 and 403 as in §2.
 
 **Validation:** none beyond the token.
 
-The sidebar uses this role. Display name and email come from the Clerk session on the client, not from this payload (`AUTHENTICATION.md` §9).
+The sidebar uses this role. Display name may still come from the Clerk session on the client. Email is available from this payload.
 
 ### 2.2 Health
 

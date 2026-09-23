@@ -304,7 +304,7 @@ Do not invent requirements. Do not expand scope without approval.
 - Follow the approved documents. If code and a document disagree, the document wins until it is changed through the conflict protocol in §15.
 - Implement only the requested phase in `docs/IMPLEMENTATION_PLAN.md`. Validate that phase manually before starting the next one.
 - Must-have work comes before should-have and nice-to-have. If time slips, cut in the order that plan gives. Do not cut evidence, the rules score, or the insufficient-evidence response.
-- Do not add a dependency, service, or abstraction the technical PRD does not name. Approved extras already recorded: Clerk, `lucide-react`.
+- Do not add a dependency, service, or abstraction the technical PRD does not name. Approved extras already recorded: Clerk, `lucide-react`, React Router, PyJWT (Clerk token verification only).
 - Keep changes inside the files the task needs. Do not edit unrelated files.
 - Use a feature branch. Do not commit directly to the shared branch.
 - Do not create test files unless the user explicitly asks for them.

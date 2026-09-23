@@ -17,7 +17,7 @@ Read the root `AGENTS.md` first. This file does not override it.
 
 ## Stack
 
-React, Vite, Tailwind CSS, Zustand, TanStack Query, Recharts, `lucide-react`, Clerk's React SDK.
+React, Vite, Tailwind CSS, Zustand, TanStack Query, Recharts, `lucide-react`, Clerk's React SDK, React Router.
 
 Do not add a component library, CSS-in-JS, another data library, or another state library.
 
