@@ -1,0 +1,26 @@
+---
+description: Scope, stack, and simplicity limits for implementation
+alwaysApply: true
+---
+
+# Scope Guardrails
+
+Follow `AGENTS.md` and the approved docs in `docs/`. Do not invent requirements, sources, endpoints, weights, or tables.
+
+## Stage
+
+Documentation is approved. Implement a phase only when `docs/IMPLEMENTATION_PLAN.md` says it is in scope and the user has asked for that phase. Finish its manual checks before the next phase.
+
+Must-have beats should-have beats nice-to-have. Cut in the order that plan lists. Do not drop evidence, the rules score, or insufficient-evidence behavior.
+
+## Stack
+
+React, Vite, Tailwind, Zustand, TanStack Query, Recharts, `lucide-react`, Clerk on the frontend. FastAPI, Supabase PostgreSQL, pgvector, LangChain where the AI design allows it, Requests, BeautifulSoup, APScheduler on the backend.
+
+Do not add a dependency, queue, cache, or service that `docs/TECHNICAL_PRD.md` does not name. Clerk, `lucide-react`, React Router, and PyJWT (Clerk token verification only) are already approved.
+
+## Simplicity
+
+One backend process. No Kafka, Celery, Redis, Kubernetes, or microservices. No extra abstraction "for later". No premature optimization. Exact vector search is enough until the design says otherwise.
+
+Do not create test files unless the user explicitly asks.

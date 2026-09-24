@@ -1,0 +1,17 @@
+---
+description: Schema limited to DATABASE_DESIGN.md
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Database Boundaries
+
+Tables, columns, and checks are those in `docs/DATABASE_DESIGN.md`. Do not add a table the design lists as omitted. Do not rename `organization_id`, `signal_type`, or `weight_version` to a local alias in the API.
+
+The vector column width stays unset until `EMBEDDING_MODEL` is chosen. Do not hardcode 768, 1024, or 1536.
+
+Foreign keys point at the documented parents. Evidence snippets are inserted only after the verbatim check. A score row's `value` equals the five factor columns. The application inserts that number. No database trigger calls a model.
+
+Do not enable Supabase Auth or Row Level Security for authorization. The backend role is the only database login the app uses.
+
+Update `DATABASE_DESIGN.md` before a migration that changes a column.

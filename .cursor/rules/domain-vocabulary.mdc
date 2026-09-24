@@ -1,0 +1,21 @@
+---
+description: Shared names for roles, signals, scores, and content layers
+alwaysApply: true
+---
+
+# Domain Vocabulary
+
+Use the names in `docs/API_CONTRACT.md` and `docs/DATABASE_DESIGN.md`. Do not invent synonyms.
+
+| Term | Use this name |
+|---|---|
+| Role codes | `SALES_REP`, `SALES_MANAGER` |
+| Signal types | `procurement`, `technology_initiative`, `leadership_change`, `funding_budget`, `strategic_announcement`, `competitor_vendor`, `contract_renewal` |
+| Signal state | `detected`, `validated`, `rejected`, `merged`, `superseded` |
+| Score bands | `high`, `medium`, `low`, `monitor` |
+| Content layer | `fact`, `interpretation`, `potential_opportunity`, `recommended_action` |
+| Cached data | `data_origin` `cached` |
+
+The seven signal types are closed. Both roles see every tracked organization. There is no assignment filter.
+
+Say "potential opportunity" and "may indicate". Do not say a procurement event is guaranteed.

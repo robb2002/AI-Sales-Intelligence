@@ -1,0 +1,19 @@
+---
+description: LLM calls go through the provider adapter only
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# AI Provider Abstraction
+
+```
+Service → AIService → adapter → configured provider
+```
+
+No file outside the adapter imports a vendor SDK. Provider name, model, and keys come from settings: `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `EMBEDDING_MODEL`.
+
+Structured extraction is validated against the schema. Invalid JSON is a failed call, not a repaired object. Temperature is 0 for JSON tasks and at most 0.2 for explanation and the Advisor.
+
+LangChain may split text and run the retriever. It does not own the scan flow. No agent loop.
+
+Prompts live in one versioned module, the ids in `docs/AI_RAG_DESIGN.md` §20. Do not bury a prompt string inside a route.

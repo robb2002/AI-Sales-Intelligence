@@ -1,0 +1,21 @@
+---
+description: How to edit approved project documents
+globs: docs/**/*.md
+alwaysApply: false
+---
+
+# Editing Project Documents
+
+The files in `docs/` are approved drafts, not empty placeholders. Do not rewrite one because a code change was easier that way.
+
+## Uncertainty
+
+Keep `NEEDS VERIFICATION` and `NEEDS DECISION` until a human closes them. Do not fill `DATA_SOURCES.md` §5.3 with a website that has not passed the five checks. Do not type a SAM.gov or USAspending deep link that the source doc still marks unverified. Do not set a pgvector width.
+
+## One document
+
+Edit the document the task names. Do not opportunistically revise its neighbors.
+
+## Conflicts
+
+Use the protocol in `documentation-authority.mdc`. Do not quietly change scoring weights, roles, or the source list.

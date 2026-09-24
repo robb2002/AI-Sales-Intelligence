@@ -1,0 +1,170 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-*: initial;
+
+  --color-navy-50: #eef2f8;
+  --color-navy-100: #d8e1ef;
+  --color-navy-200: #b3c3dd;
+  --color-navy-300: #7f97be;
+  --color-navy-400: #4e6b9b;
+  --color-navy-500: #2f4e7e;
+  --color-navy-600: #1e3a66;
+  --color-navy-700: #172e52;
+  --color-navy-800: #11223d;
+  --color-navy-900: #0b1729;
+
+  --color-indigo-50: #eef0fe;
+  --color-indigo-100: #e0e3fc;
+  --color-indigo-200: #c4c9f9;
+  --color-indigo-300: #9aa2f2;
+  --color-indigo-400: #7b84ec;
+  --color-indigo-500: #5b62e3;
+  --color-indigo-600: #4a4fd1;
+  --color-indigo-700: #3b3fac;
+  --color-violet-500: #8b5cf6;
+
+  --color-amber-50: #fff8eb;
+  --color-amber-100: #feefc7;
+  --color-amber-300: #fcd34d;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+
+  --color-green-50: #ecfdf5;
+  --color-green-100: #d1fae5;
+  --color-green-500: #10b981;
+  --color-green-600: #059669;
+  --color-green-700: #047857;
+
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+
+  --color-neutral-0: #ffffff;
+  --color-neutral-50: #f7f9fc;
+  --color-neutral-100: #eef2f7;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
+  --color-neutral-900: #0f172a;
+
+  /* Semantic tokens (UI_UX_DESIGN.md §2.3). Components use these names. */
+  --color-app: #f7f9fc;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #eef2f7;
+  --color-surface-selected: #eef2f8;
+  --color-surface-ai: #0b1729;
+  --color-surface-ai-subtle: #eef0fe;
+  --color-default: #e2e8f0;
+  --color-strong: #cbd5e1;
+  --color-ai: #c4c9f9;
+  --color-primary: #0f172a;
+  --color-secondary: #64748b;
+  --color-muted: #94a3b8;
+  --color-inverse: #ffffff;
+  --color-on-ai: #e8ebf5;
+  --color-on-ai-muted: #7f97be;
+  --color-status-opportunity: #d97706;
+  --color-status-positive: #059669;
+  --color-status-risk: #dc2626;
+  --color-status-ai: #4a4fd1;
+  --color-status-neutral: #64748b;
+  --color-interactive: #1e3a66;
+  --color-interactive-hover: #172e52;
+  --color-focus-ring: #4e6b9b;
+  --color-focus-ring-ai: #7b84ec;
+
+  --color-signal-procurement: #1e3a66;
+  --color-signal-technology: #2e7da8;
+  --color-signal-leadership: #7c6ab0;
+  --color-signal-funding: #2f8f6b;
+  --color-signal-strategic: #b07a2e;
+  --color-signal-competitor: #a2506b;
+  --color-signal-contract: #5c6b7a;
+
+  --font-sans: Inter, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --text-*: initial;
+  --text-display: 1.875rem;
+  --text-display--line-height: 2.25rem;
+  --text-display--font-weight: 600;
+  --text-h1: 1.5rem;
+  --text-h1--line-height: 2rem;
+  --text-h1--font-weight: 600;
+  --text-h2: 1.25rem;
+  --text-h2--line-height: 1.75rem;
+  --text-h2--font-weight: 600;
+  --text-h3: 1rem;
+  --text-h3--line-height: 1.5rem;
+  --text-h3--font-weight: 600;
+  --text-body-lg: 1rem;
+  --text-body-lg--line-height: 1.5rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-body-sm: 0.8125rem;
+  --text-body-sm--line-height: 1.125rem;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1rem;
+  --text-label--font-weight: 600;
+  --text-label--letter-spacing: 0.06em;
+  --text-metric: 1.75rem;
+  --text-metric--line-height: 2rem;
+  --text-metric--font-weight: 600;
+  --text-metric-lg: 2.25rem;
+  --text-metric-lg--line-height: 2.5rem;
+  --text-metric-lg--font-weight: 600;
+  --text-score: 2.75rem;
+  --text-score--line-height: 3rem;
+  --text-score--font-weight: 700;
+
+  --radius-*: initial;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --shadow-*: initial;
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+
+  --animate-shimmer: shimmer 1.5s linear infinite;
+
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+@layer base {
+  html {
+    background-color: var(--color-app);
+  }
+
+  body {
+    @apply bg-app font-sans text-body text-primary antialiased;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
