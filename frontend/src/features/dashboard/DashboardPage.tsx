@@ -17,6 +17,7 @@ const DISCOVERY_STAGES = [
   { key: 'discovering', label: 'Discovering sources' },
   { key: 'validating_sources', label: 'Validating sources' },
   { key: 'saving_sources', label: 'Saving approved sources' },
+  { key: 'extracting', label: 'Extracting content' },
 ] as const
 
 function stageIndex(stage: string | null | undefined, status: string): number {
@@ -244,9 +245,25 @@ function OrganizationSourcesBlock({
   name: string
   sources: OrganizationSourceItem[]
 }) {
+  const getExtractionBadge = (status: string) => {
+    switch (status) {
+      case 'extracted':
+        return <Badge variant="soft-positive">Content extracted</Badge>
+      case 'extracting':
+        return <Badge variant="soft-ai" className="animate-pulse">In progress</Badge>
+      case 'failed':
+        return <Badge variant="soft-risk">Extraction failed</Badge>
+      default:
+        return null
+    }
+  }
+
   return (
     <div className="space-y-3 border-t border-default pt-4 first:border-t-0 first:pt-0">
-      <h3 className="text-body font-medium text-primary">{name}</h3>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h3 className="text-body font-medium text-primary">{name}</h3>
+      </div>
+      
       {sources.length === 0 ? (
         <p className="text-body-sm text-muted">No approved sources stored yet.</p>
       ) : (
@@ -259,6 +276,7 @@ function OrganizationSourcesBlock({
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="soft-ai">{source.page_category}</Badge>
                 <Badge variant="soft-positive">{source.status}</Badge>
+                {getExtractionBadge(source.extraction_status)}
               </div>
               <p className="mt-2 text-body text-primary">
                 {source.source_title || 'Official page'}

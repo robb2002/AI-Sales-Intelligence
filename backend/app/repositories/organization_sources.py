@@ -45,6 +45,7 @@ class OrganizationSource(Base):
     source_title: Mapped[str | None] = mapped_column(Text)
     page_category: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, index=True)
+    extraction_status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
     is_official: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     rejection_reason: Mapped[str | None] = mapped_column(Text)
     last_validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -24,6 +24,7 @@ class OrganizationSourceItem(BaseModel):
     source_title: str | None
     page_category: str
     status: str
+    extraction_status: str
     is_official: bool
     rejection_reason: str | None
     last_validated_at: datetime

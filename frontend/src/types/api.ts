@@ -57,6 +57,7 @@ export interface OrganizationSourceItem {
   source_title: string | null
   page_category: string
   status: 'approved' | 'rejected'
+  extraction_status: 'pending' | 'extracting' | 'extracted' | 'failed'
   is_official: boolean
   rejection_reason: string | null
   last_validated_at: string

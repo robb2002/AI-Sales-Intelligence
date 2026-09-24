@@ -215,13 +215,44 @@ async def run_organization_discovery(
         scan.sources = source_rows
         scan.sources_approved = approved
         scan.sources_rejected = rejected
-        scan.status = "succeeded" if approved > 0 else "partial" if rejected > 0 else "failed"
-        if approved == 0 and rejected == 0:
-            scan.status = "failed"
-            scan.error_detail = "No candidates to validate"
-        scan.stage = None
-        scan.finished_at = datetime.now(timezone.utc)
         await session.commit()
+
+        # Decide if we can proceed to extracting
+        approved_urls = (
+            await session.execute(
+                select(OrganizationSource.url).where(
+                    OrganizationSource.organization_id == organization_id,
+                    OrganizationSource.status == "approved",
+                )
+            )
+        ).scalars().all()
+        urls_to_scrape = [str(u) for u in approved_urls if str(u).strip()]
+
+        if urls_to_scrape:
+            scan.status = "running"
+            scan.stage = "extracting"
+            await session.commit()
+
+            import asyncio
+            from app.ingestion.scraping import run_scraping_pipeline
+
+            asyncio.create_task(
+                run_scraping_pipeline(
+                    session_factory=session_factory,
+                    scan_id=scan_id,
+                    organization_id=organization_id,
+                    urls=urls_to_scrape,
+                    settings=settings,
+                )
+            )
+        else:
+            scan.status = "partial" if rejected > 0 else "failed"
+            if approved == 0 and rejected == 0:
+                scan.status = "failed"
+                scan.error_detail = "No candidates to validate"
+            scan.stage = None
+            scan.finished_at = datetime.now(timezone.utc)
+            await session.commit()
 
 
 async def _fail(session: AsyncSession, scan: ScanRun, detail: str) -> None:

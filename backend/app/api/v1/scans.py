@@ -122,6 +122,7 @@ async def list_organization_sources(
                 source_title=row.source_title,
                 page_category=row.page_category,
                 status=row.status,
+                extraction_status=row.extraction_status,
                 is_official=row.is_official,
                 rejection_reason=row.rejection_reason,
                 last_validated_at=row.last_validated_at,
@@ -132,6 +133,7 @@ async def list_organization_sources(
         limit=limit,
         offset=offset,
     )
+
 
 
 @router.post("/scans", status_code=202)
