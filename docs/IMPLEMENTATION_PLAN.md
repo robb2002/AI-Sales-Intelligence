@@ -462,7 +462,7 @@ These six items stay open on purpose. Resolve them during implementation and val
 1. **Initial organizations.** Select the first two TARGET organizations only after validating real evidence from SAM.gov or the organization's official website. Do not hard-code organization names into business logic. Store them as database records (`DATA_SOURCES.md` §5.3).
 2. **SAM.gov production endpoint.** Validate the documented production paths with the issued API key. Use only the path that returns a successful response. Do not invent or assume an endpoint (`DATA_SOURCES.md` D1).
 3. **SAM.gov API quota.** The 10-request daily cap is an MVP safeguard. Verify the quota on the issued key before raising or changing that cap. Do not describe the temporary cap as SAM.gov's official quota (`DATA_SOURCES.md` D2).
-4. **LLM and embedding model.** Both stay configurable. Call them only through the provider and embedding adapters. Choosing a model later must not require a change to the core application architecture. Leave the vector width unset until the embedding model is chosen.
+4. **LLM and embedding model.** Both stay configurable behind adapters. **Updated 2026-09-25:** chat `interns-gpt-4.1` (`LLM_MODEL`); embeddings Azure `text-embedding-3-small` (`EMBEDDING_MODEL`), vector width 1536.
 5. **Hosting.** The hosting target stays open. Do not add hosting-specific architecture until that target is selected.
 6. **Live scan duration.** Measure the real end-to-end scan during implementation. Do not set an artificial performance target before that measurement exists (`PRODUCT_PRD.md` Q8).
 
@@ -471,3 +471,9 @@ Already settled, and not reopened by the list above: store only fetched URLs, an
 ### Interim MVP note (discovery-only Scan All)
 
 Before full Phase 4 Scan Now, the dashboard Scan Now control may run **discovery-only** Scan All for `tracking_status = active` organizations: LLM proposes official-domain candidates, backend validates, results upsert into `organization_sources`. Full collect → extract → score remains the plan end state and is added in later slices without replacing this table.
+
+**Updated 2026-09-24.** The same Scan now also collects the approved pages, including the organization's own news hub and up to five of its articles, into `documents` (`DATA_SOURCES.md` §5.2b). This covers M4 for the active organizations.
+
+**Updated 2026-09-24.** Scan All also runs SAM.gov in parallel with website collection for the batch: one shared search (plus at most a few documented `title` searches when needed), local org match, store under `documents` with `source_id` = `sam_gov` (M3). Application cap 10 requests / 24 hours.
+
+**Updated 2026-09-24.** After documents are stored, the same scan extracts signals with the LLM adapter, validates snippets in code, and writes `signals` + `evidence` (M5). Dedup (M6) then runs deterministically: content-hash skip, external-id merge, and strong tier-3 merges (exact snippet or exact normalized title within 30 days). Embedding tier 4 stays deferred (S8). Correlation, rules score, and Advisor remain later slices. USAspending (S4) and IPEDS (S3) stay deferred.

@@ -1108,7 +1108,17 @@ hold; it does not change the data.
 
 **Identity header** (`FR-ORG-01`): name in `text-h1`; type, state, and website in `text-body-sm`
 `text-secondary` with the website as an external link. Scan metadata (`FR-ORG-07`) in
-`text-caption` `text-muted`, naming sources covered.
+`text-caption` `text-muted`, naming sources covered. Tracking status is a `soft-neutral` or
+`soft-positive` badge beside the name for every role.
+
+**Manager actions** (`FR-ROLE-05`, `FR-ORG-09`, `FR-ORG-10`): on the shared Organizations list and profile,
+only `SALES_MANAGER` sees **Add organization**, **Edit**, and a segmented **tracking control**
+(Inactive | Active text inside the control — navy selected segment, not green/red alone) placed
+beside **Edit**. Profile header actions: **Edit**, tracking control, **Scan Now** (shared `h-10`
+height). On the Sources section managers see **Add official page**. Adding a page URL requires live
+validation on the organization's official host; failure shows an alert and does not persist.
+Managers may **Reject** an approved page so later scans skip it. `SALES_REP` sees the same pages
+without those write controls. There is still no separate manager shell (U4).
 
 **Reference band** (`FR-ORG-02`): a distinct `surface-sunken` strip, **not** a card, carrying the
 `text-label` heading "INSTITUTIONAL REFERENCE (NCES IPEDS)" and a right-aligned `soft-neutral`
@@ -1268,11 +1278,16 @@ Empty results render the §35 empty state with a "Clear filters" action (`FR-SRC
 ## 32. Scan Now interaction
 
 Trigger: `secondary` button with a `RefreshCw` icon, labelled "Scan Now", on the organization
-profile header (`FR-ORG-06`). The dashboard carries "Scan All" as a `secondary` button.
+profile header (`FR-ORG-06`). This button starts a scan for **that organization only**. The
+dashboard "Scan Now" / Scan All control starts scans for every `tracking_status = active`
+organization.
 
 Interaction sequence:
 
-1. **Idle** — enabled, with a `text-caption` `text-muted` sub-line showing the last scan time.
+1. **Idle (active)** — enabled, with a `text-caption` `text-muted` sub-line showing the last scan time.
+1a. **Idle (inactive)** — Scan Now is disabled. A `text-caption` `text-muted` line says to activate
+   the organization before scanning. Managers use Activate; representatives see the same disabled
+   state until a manager activates tracking.
 2. **Triggered** — the button enters loading state immediately; the `ScanProgress` panel (§33)
    appears directly beneath the header with a `motion-base` expand.
 3. **Already running** — if a scan is already active for this organization
@@ -1522,7 +1537,7 @@ requires agreement before it is created.
 
 | Group | Components |
 |---|---|
-| Primitives | `Button` `IconButton` `Input` `Textarea` `Select` `MultiSelect` `Menu` `Checkbox` `Badge` `Alert` `Toast` `Tooltip` `Card` `Skeleton` `Spinner` `Tabs` `Modal` `Drawer` `Pagination` |
+| Primitives | `Button` `IconButton` `Input` `Textarea` `Select` `MultiSelect` `Menu` `Checkbox` `TrackingToggle` `Badge` `Alert` `Toast` `Tooltip` `Card` `Skeleton` `Spinner` `Tabs` `Modal` `Drawer` `Pagination` |
 | Layout | `AppShell` `Sidebar` `Header` `PageHeader` `Breadcrumb` `ContentGrid` |
 | Data | `DataTable` `MetricCard` `EmptyState` `ErrorState` `FilterBar` `FilterChip` `SortSelect` |
 | Charts | `AreaChartCard` `BarChartCard` `ScoreDistributionChart` `Sparkline` `ChartTooltip` `ChartEmpty` |
@@ -1564,7 +1579,7 @@ Applied before any UI pull request is approved.
 | U1 | `lucide-react` as the icon set | §8 | **Decided:** yes |
 | U2 | Verify contrast for `amber-600`/`amber-50` and `indigo-600`/`indigo-50` | §39 | Measure at implementation; fall back to `-700` text shades |
 | U3 | Is the Advisor primarily a contextual panel or a full page? | §29 | Both, sharing one component; prioritise the panel, since evidence stays visible |
-| U4 | Does the Sales Manager need a distinct screen? | §25 | **Decided:** no. Both roles see the same screens and the same organizations |
+| U4 | Does the Sales Manager need a distinct screen? | §25–§26 | **Decided:** no. Both roles see the same screens and the same organizations. Manager-only **Add / Edit / Activate** controls appear on the Organizations list and profile (`FR-ROLE-05`) |
 | U5 | Pie/donut permitted for signal type distribution? | §17.3 | No — horizontal bars read better with seven categories |
 
 > Also resolved: typeface is Inter (§3.1). The 0–24 score band is labelled **Monitor**, matching

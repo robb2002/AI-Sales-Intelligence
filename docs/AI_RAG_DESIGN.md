@@ -290,7 +290,7 @@ Normalized document
 
 Clean means: drop script and style leftovers, collapse whitespace, keep the title. Do not summarize during cleaning. The chunk text must remain words that appeared in the source, so later snippet checks still make sense.
 
-Unchanged documents (same content hash) are not re-embedded.
+Unchanged documents (same content hash) are not re-embedded. A changed website document is replaced in place (`DATABASE_DESIGN.md` §6): its old chunks are deleted, it is chunked and embedded again, and extraction runs again on the new body. That is the reindex.
 
 Only documents from approved sources are indexed (`FR-DATA-02`). Cached fallback documents may be indexed for the demo and must carry the cached flag through chunk metadata (`FR-FB-03`).
 
@@ -338,9 +338,7 @@ Similarity search filters on `organization_id` before ranking. A chunk without a
 
 ## 16. Embeddings
 
-One open-source embedding model serves both RAG and deduplication tier 4. The model id is `EMBEDDING_MODEL`. Deployment is in-process or a hosted endpoint, and that choice is deferred until the host is known (`TECHNICAL_PRD.md` §5.4, T1).
-
-This document does not set the vector dimension. `DATABASE_DESIGN.md` must leave the column width as "the selected model's output width" until that decision.
+One embedding model serves both RAG and deduplication tier 4. **Updated 2026-09-25:** Azure OpenAI `text-embedding-3-small` (deployment name in `EMBEDDING_MODEL`), chat `interns-gpt-4.1` (`LLM_MODEL`), same Azure resource/key, vector width **1536**. Calls go through the embedding adapter only.
 
 Rules that are already fixed:
 
@@ -709,7 +707,7 @@ If the provider quota is exhausted, new explanations and Advisor answers become 
 In scope for the week:
 
 - The nine pipeline stages in `TECHNICAL_PRD.md` §21, with the checks in this document.
-- One embedding model, shared with dedup, model choice deferred until hosting is chosen.
+- One embedding model shared with dedup: Azure `text-embedding-3-small`, width 1536; chat `interns-gpt-4.1` (**Updated 2026-09-25**).
 - Advisor over one organization or one opportunity, with the sufficiency gate.
 - Score `v1` explained, not chosen, by the model.
 - Manual prompt versions. No prompt-management service.

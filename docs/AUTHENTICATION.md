@@ -170,12 +170,13 @@ only.
 
 | Code | UI label | MVP access |
 |---|---|---|
-| `SALES_REP` | Sales Representative | Every tracked organization, every MVP screen, Scan Now, Scan All, AI Sales Advisor |
-| `SALES_MANAGER` | Sales Manager | The same set. No manager-only screen |
+| `SALES_REP` | Sales Representative | Every tracked organization (view), every MVP screen, Scan Now, Scan All, AI Sales Advisor. Cannot create or update organizations |
+| `SALES_MANAGER` | Sales Manager | The same view set, plus create/update organization identity and activate/deactivate tracking. No separate manager-only application shell |
 
 `FR-ROLE-01` — one role per user.
 `FR-ROLE-03` — both roles see the same evidence.
 `FR-ROLE-04` — queries are not filtered by the calling user.
+`FR-ROLE-05` — only `SALES_MANAGER` may create or update organizations (`API_CONTRACT.md` §6.4–§6.5).
 
 ### 6.1 How a Clerk user receives a role
 
@@ -206,8 +207,10 @@ operation can be added without a new identity system.
 
 | Operation | `SALES_REP` | `SALES_MANAGER` | No role |
 |---|---|---|---|
-| Call any protected MVP endpoint (read intelligence, Advisor, Scan Now, Scan All) | Allowed | Allowed | `403` |
+| Call protected read endpoints, Advisor, Scan Now, Scan All | Allowed | Allowed | `403` |
 | See every tracked organization | Allowed | Allowed | `403` |
+| `POST /api/v1/organizations` and `PATCH /api/v1/organizations/{id}` | `403` `INSUFFICIENT_PERMISSION` | Allowed | `403` |
+| `POST` / `PATCH` organization page sources (§6.3a–§6.3b) | `403` `INSUFFICIENT_PERMISSION` | Allowed | `403` |
 | Assign or edit roles | No endpoint | No endpoint | No endpoint |
 | Manage other users | No endpoint | No endpoint | No endpoint |
 

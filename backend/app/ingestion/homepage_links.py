@@ -1,32 +1,14 @@
 from __future__ import annotations
 
-import logging
 import re
-from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse
-
-import httpx
+from urllib.parse import urlparse
 
 from app.ingestion.url_validation import host_matches_official
 
-logger = logging.getLogger("app.ingestion.homepage_links")
-
-
-class _AnchorParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.hrefs: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() != "a":
-            return
-        for key, value in attrs:
-            if key.lower() == "href" and value:
-                self.hrefs.append(value.strip())
-
-
 _RELEVANT_HINTS = (
     "news",
+    "newsroom",
+    "press",
     "president",
     "leadership",
     "provost",
@@ -56,6 +38,33 @@ _RELEVANT_HINTS = (
     "foundation",
 )
 
+_NEWS_SEGMENTS = frozenset({"news", "newsroom", "press", "press-releases", "announcements"})
+_NON_ARTICLE_SEGMENTS = frozenset(
+    {
+        "tag",
+        "tags",
+        "category",
+        "categories",
+        "author",
+        "authors",
+        "page",
+        "topic",
+        "topics",
+        "search",
+        "feed",
+        "rss",
+        "archive",
+        "archives",
+        "events",
+        "calendar",
+        "subscribe",
+        "contact",
+        "media-contacts",
+        "experts",
+    }
+)
+_SKIPPED_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".css", ".js", ".zip", ".xml", ".ics")
+
 # Individual dated articles are too deep for a reusable source register.
 _ARTICLE_PATH = re.compile(
     r"(?:/20\d{2}/\d{2}/|/20\d{2}\d{2}\d{2}-|/news/\d{8}-)",
@@ -71,7 +80,6 @@ def is_reusable_source_url(url: str) -> bool:
         return False
     parts = [part for part in path.split("/") if part]
     lowered = path.lower()
-    # News hub is fine; individual story slugs under /news/ are not reusable sources.
     if "/news/" in lowered and len(parts) >= 2:
         return False
     if len(parts) > 3:
@@ -79,70 +87,91 @@ def is_reusable_source_url(url: str) -> bool:
     return True
 
 
-async def collect_official_page_urls(
-    *,
-    root_url: str,
-    official_host: str,
-    user_agent: str,
-    timeout_seconds: float,
-    max_links: int = 40,
+def is_news_hub(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    parts = [part.lower() for part in (parsed.path or "/").split("/") if part]
+    if host.startswith(("news.", "newsroom.")) and not parts:
+        return True
+    return 0 < len(parts) <= 2 and parts[-1] in _NEWS_SEGMENTS
+
+
+def candidate_links(
+    links: list[str], *, root_url: str, official_host: str, max_links: int = 40
 ) -> list[str]:
-    """Fetch the official homepage and collect same-domain links. Deterministic, no LLM."""
-    headers = {"User-Agent": user_agent, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
-    urls: list[str] = [root_url]
-    try:
-        async with httpx.AsyncClient(
-            timeout=timeout_seconds,
-            follow_redirects=True,
-            headers=headers,
-            max_redirects=5,
-        ) as client:
-            response = await client.get(root_url)
-    except httpx.HTTPError:
-        logger.info("Homepage fetch failed for link discovery")
-        return urls
-
-    if response.status_code >= 400 or not response.text:
-        return urls
-
-    final_root = str(response.url)
-    if host_matches_official(urlparse(final_root).hostname, official_host):
-        urls[0] = final_root
-
-    parser = _AnchorParser()
-    try:
-        parser.feed(response.text)
-    except Exception:
-        return _unique(urls)
-
-    ranked: list[tuple[int, str]] = []
-    for href in parser.hrefs:
-        absolute = urljoin(final_root, href)
-        parsed = urlparse(absolute)
-        if parsed.scheme not in ("http", "https"):
-            continue
+    """Rank same-domain links from the fetched homepage. Deterministic, no LLM."""
+    ranked: list[tuple[int, int, str]] = []
+    for position, link in enumerate(links):
+        parsed = urlparse(link)
         if not host_matches_official(parsed.hostname, official_host):
             continue
-        path = (parsed.path or "/").lower()
-        if path.endswith((".pdf", ".jpg", ".png", ".gif", ".css", ".js", ".zip")):
+        if (parsed.path or "/").lower().endswith(_SKIPPED_EXTENSIONS):
             continue
-        if not is_reusable_source_url(absolute):
+        if not is_reusable_source_url(link):
             continue
-        score = sum(1 for hint in _RELEVANT_HINTS if hint in absolute.lower())
-        ranked.append((score, absolute))
+        score = sum(1 for hint in _RELEVANT_HINTS if hint in link.lower())
+        if is_news_hub(link):
+            score += 5
+        ranked.append((score, position, link))
 
     ranked.sort(key=lambda item: (-item[0], item[1]))
-    for score, absolute in ranked:
+    urls = [root_url]
+    for score, _position, link in ranked:
         if score == 0 and len(urls) >= 12:
             continue
-        urls.append(absolute)
+        urls.append(link)
         if len(urls) >= max_links:
             break
+    return urls
 
-    return _unique(urls)
+
+def select_article_links(
+    links: list[str], *, hub_url: str, official_host: str, limit: int
+) -> list[str]:
+    """Article links on a news hub, in the order the hub lists them."""
+    if limit <= 0:
+        return []
+    hub = urlparse(hub_url)
+    hub_host = (hub.hostname or "").lower()
+    hub_path = (hub.path or "/").rstrip("/")
+
+    articles: list[str] = []
+    seen: set[str] = set()
+    for link in links:
+        parsed = urlparse(link)
+        host = (parsed.hostname or "").lower()
+        if host != hub_host or not host_matches_official(host, official_host):
+            continue
+        path = (parsed.path or "/").rstrip("/")
+        if parsed.query or path.lower().endswith(_SKIPPED_EXTENSIONS):
+            continue
+        if hub_path and not path.startswith(hub_path + "/"):
+            continue
+        parts = [part.lower() for part in path.split("/") if part]
+        if not parts or any(part in _NON_ARTICLE_SEGMENTS for part in parts):
+            continue
+        if not _looks_like_article_slug(parts[-1]):
+            continue
+        key = f"{host}{path}".lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        articles.append(f"{parsed.scheme}://{parsed.netloc}{path}")
+        if len(articles) >= limit:
+            break
+    return articles
+
+
+def _looks_like_article_slug(slug: str) -> bool:
+    """Story slugs are long headlines; section and topic pages are a few words."""
+    tokens = [token for token in re.split(r"[-_]", slug) if token]
+    has_digit = any(char.isdigit() for char in slug)
+    return len(tokens) >= 5 or (len(tokens) >= 3 and has_digit)
 
 
 def guess_page_category(url: str, title: str | None = None) -> str:
+    if is_news_hub(url):
+        return "news"
     text = f"{url} {title or ''}".lower()
     rules = (
         ("procurement", ("procurement", "purchasing", "rfp", "bid", "solicitation")),
@@ -167,15 +196,3 @@ def title_from_path(url: str) -> str | None:
     part = path.split("/")[-1].replace("-", " ").replace("_", " ")
     part = re.sub(r"\s+", " ", part).strip()
     return part.title() if part else None
-
-
-def _unique(urls: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for url in urls:
-        key = url.split("#", 1)[0].rstrip("/").lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(url)
-    return out

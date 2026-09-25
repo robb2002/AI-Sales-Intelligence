@@ -32,7 +32,7 @@ Examples use angle-bracket placeholders. They are not sample organizations, noti
 | Booleans | `true` / `false`. Absent means the field was not allowed, not false |
 | Null | A nullable field is present and `null`. Do not drop the key |
 | Auth header | `Authorization: Bearer <Clerk session token>` on every path except `GET /api/v1/health` |
-| Roles | `SALES_REP` and `SALES_MANAGER`. Both may call every protected endpoint. Responses are not filtered by user (`FR-ROLE-04`) |
+| Roles | `SALES_REP` and `SALES_MANAGER`. Both may call every protected **read** endpoint and Scan/Advisor writes. Create and update of organizations is `SALES_MANAGER` only (§6.4–§6.5). List and detail responses are not filtered by user (`FR-ROLE-04`) |
 
 ### 1.1 Content layers
 
@@ -63,9 +63,11 @@ User-facing prose that the AI produced or that quotes a source includes `content
 
 **Scan stage (full pipeline, later phases):** `collecting`, `extracting`, `validating`, `deduplicating`, `correlating`, `scoring`
 
-**Scan stage (MVP discovery-only):** `discovering`, `validating_sources`, `saving_sources`
+**Scan stage (MVP discovery, page collection, and signal extraction):** `discovering`, `validating_sources`, `saving_sources`, `extracting`
 
-**Organization page category** (discovery UI only; not a signal type): `procurement`, `technology`, `digital_learning`, `assessment`, `funding`, `leadership`, `strategic_initiative`, `partnership`
+**Organization page category** (discovery UI only; not a signal type): `procurement`, `technology`, `digital_learning`, `assessment`, `funding`, `leadership`, `strategic_initiative`, `partnership`, `news`
+
+**Organization source extraction status:** `pending`, `extracting`, `extracted`, `failed`
 
 **Organization source status:** `approved`, `rejected`
 
@@ -160,10 +162,11 @@ Every error body, including 401 and 403:
 | 401 | §2 | `AUTH_MISSING`, `AUTH_INVALID`, `AUTH_EXPIRED` |
 | 403 | §2 | `USER_NOT_PROVISIONED`, `USER_WITHOUT_ROLE`, `INSUFFICIENT_PERMISSION` |
 | 404 | Id not in the database | `NOT_FOUND` |
+| 409 | Unique constraint conflict (for example duplicate `website_url`) | `CONFLICT` |
 | 429 | Scan or Advisor limit | `SCAN_RATE_LIMITED`, `ADVISOR_RATE_LIMITED` |
 | 500 | Unhandled server failure | `INTERNAL_ERROR` |
 
-`details` for `VALIDATION_ERROR` is a map of field name to a short reason. For `NOT_FOUND`, `details.resource` is `organization`, `signal`, `opportunity`, `scan`, `scan_batch`, `evidence`, or `advisor_session`. For 429, `details.retry_after_seconds` is an integer.
+`details` for `VALIDATION_ERROR` is a map of field name to a short reason. For `NOT_FOUND`, `details.resource` is `organization`, `signal`, `opportunity`, `scan`, `scan_batch`, `evidence`, or `advisor_session`. For `CONFLICT`, `details.field` names the conflicting field. For 429, `details.retry_after_seconds` is an integer.
 
 `message` does not include stack traces, tokens, or provider keys.
 
@@ -299,6 +302,8 @@ Detail adds:
   "organization_id": "<uuid>",
   "name": "<stored name>",
   "organization_type": "k12_district",
+  "market_role": "target",
+  "tracking_status": "active",
   "state_code": "<USPS or null>",
   "website_url": "<official site or null>",
   "signal_count": 0,
@@ -307,6 +312,8 @@ Detail adds:
   "data_origin": "live"
 }
 ```
+
+`market_role` is `target` or `competitor`. `tracking_status` is `active` or `inactive`. Scan All uses `active` only.
 
 Detail adds `ipeds` and `last_scan`.
 
@@ -346,6 +353,8 @@ Detail adds `ipeds` and `last_scan`.
 ```
 
 `trigger` is `manual` or `scheduled`. `stage` is `null` when the run has not started or has finished.
+
+MVP scans also return `batch_id` (`null` for a run outside Scan All), `requested_by_email` (the signed-in user who started it, or `null` for scheduled and older runs), and `candidates_found`, `sources_approved`, `sources_rejected`, and `documents_collected` (integers, default 0). `documents_collected` counts documents that were inserted or replaced because the page changed; an unchanged page adds 0.
 
 Detail adds `sources`, `changes`, and `batch_id` (`null` when the run was not part of Scan All).
 
@@ -419,6 +428,7 @@ When `advisor_status` is `unavailable`, the model did not return a usable answer
 | `q` | Optional. 0 to 200 characters. Matches organization name. Empty is the same as omitted. Fewer than 2 characters returns `data: []` and `total: 0` without an error, so the global search box can stay quiet |
 | `organization_type` | Optional. Repeatable. Each value must be an organization type |
 | `state_code` | Optional. Repeatable. Two-letter USPS code |
+| `tracking_status` | Optional. Repeatable. `active` or `inactive` |
 | `has_opportunities` | Optional. `true` or `false` |
 | `sort` | `name` or `recently_scanned`. Default `name` |
 | `direction` | `asc` or `desc`. Default `asc` for `name`, `desc` for `recently_scanned` |
@@ -465,6 +475,8 @@ Signals and opportunities for the organization are not inlined. The client calls
       "source_title": "<title or null>",
       "page_category": "technology",
       "status": "approved",
+      "extraction_status": "extracted",
+      "document_count": 0,
       "is_official": true,
       "rejection_reason": null,
       "last_validated_at": "2026-09-23T12:00:00Z"
@@ -477,6 +489,113 @@ Signals and opportunities for the organization are not inlined. The client calls
 ```
 
 **Errors:** 401, 403, 404 if the organization does not exist.
+
+### 6.3a Add organization page source
+
+| | |
+|---|---|
+| Method / path | `POST /api/v1/organizations/{organization_id}/sources` |
+| Auth | Bearer |
+| Roles | `SALES_MANAGER` only |
+
+Managers may add an **official same-domain page URL** for that organization so Scan Now collects it. This is not a free-form internet ingest and not a path to register SAM.gov, IPEDS, USAspending, or third-party sites.
+
+**Body**
+
+| Field | Rule |
+|---|---|
+| `url` | Required. Public page URL on the organization's official website host (or subdomain) |
+| `page_category` | Required. One of §1.2 organization page categories |
+| `source_title` | Optional. 1–200 characters. When omitted, the server may use the page `<title>` after a successful fetch |
+
+**Server behavior**
+
+1. Load the organization. It must have a stored `website_url`.
+2. Normalize `url`. The registrable host must match the organization's official host (same domain or subdomain).
+3. Live-validate with the same fetcher rules as §6.4 (User-Agent, robots, redirects staying on the official host, reject gated/non-HTML failures).
+4. Upsert `organization_sources` on `(organization_id, url)` with `status` `approved`, `extraction_status` `pending`, `is_official` true, refreshed `last_validated_at`.
+5. Do not invent registry sources. SAM.gov and other APIs stay on the scan pipeline.
+
+**201:** one organization source row (same shape as §6.3).
+
+**Errors:** 400 `VALIDATION_ERROR` (including `details.url` when verification or host mismatch fails), 401, 403 `INSUFFICIENT_PERMISSION`, 404 if the organization does not exist, 409 when an approved row for that final URL already exists (`details.field` `url`).
+
+### 6.3b Reject organization page source
+
+| | |
+|---|---|
+| Method / path | `PATCH /api/v1/organizations/{organization_id}/sources/{organization_source_id}` |
+| Auth | Bearer |
+| Roles | `SALES_MANAGER` only |
+
+**Body**
+
+| Field | Rule |
+|---|---|
+| `status` | Required. Only `rejected` in this slice |
+| `rejection_reason` | Optional. Short plain reason |
+
+Sets `status` to `rejected` so later scans do not collect the page. Does not delete documents already stored.
+
+**200:** the updated organization source row.
+
+**Errors:** 400, 401, 403, 404.
+
+### 6.4 Create organization
+
+| | |
+|---|---|
+| Method / path | `POST /api/v1/organizations` |
+| Auth | Bearer |
+| Roles | `SALES_MANAGER` only |
+
+**Body**
+
+| Field | Rule |
+|---|---|
+| `name` | Required. 1–200 characters after trim |
+| `organization_type` | Required. One of §1.2 organization types |
+| `market_role` | Required. `target` or `competitor` |
+| `state_code` | Optional. Two-letter USPS code, or `null` |
+| `website_url` | Required. Official public website. Normalized and live-validated before insert |
+
+**Server behavior**
+
+1. Normalize `website_url` to an `https://` URL (add scheme when missing).
+2. Resolve the registrable host. Reject private, loopback, and non-DNS hosts.
+3. Perform a live HTTP GET with the project's honest User-Agent, following same-host redirects, respecting robots for that URL.
+4. Reject when the host is unreachable, the status is not 2xx, the body looks gated (login/CAPTCHA/paywall markers), or robots disallow the path.
+5. Persist the **final URL after redirects** as `website_url`. It must be unique.
+6. Create the row with `tracking_status` **`inactive`**. The manager activates tracking with §6.5 before Scan All includes it.
+
+**201:** organization detail (§5.5). `ipeds` and `last_scan` are `null`.
+
+**Errors:** 400 `VALIDATION_ERROR` (including `details.website_url` when verification fails), 401, 403 `INSUFFICIENT_PERMISSION` for `SALES_REP`, 409 when `website_url` already exists (`code` `CONFLICT`, `details.field` `website_url`).
+
+### 6.5 Update organization
+
+| | |
+|---|---|
+| Method / path | `PATCH /api/v1/organizations/{organization_id}` |
+| Auth | Bearer |
+| Roles | `SALES_MANAGER` only |
+
+**Body** — all fields optional; at least one required.
+
+| Field | Rule |
+|---|---|
+| `name` | 1–200 characters after trim |
+| `organization_type` | Organization type enum |
+| `market_role` | `target` or `competitor` |
+| `state_code` | Two-letter USPS code, or `null` to clear |
+| `website_url` | When present and different from the stored value, re-run the §6.4 live website validation and store the final URL |
+| `tracking_status` | `active` or `inactive` |
+
+**200:** organization detail (§5.5).
+
+**Errors:** 400, 401, 403 `INSUFFICIENT_PERMISSION` for `SALES_REP`, 404, 409 on duplicate `website_url`.
+
+There is no DELETE organization endpoint. Managers deactivate tracking instead.
 
 ---
 
@@ -585,9 +704,9 @@ No create or delete endpoint. Opportunities appear only after a scan applies the
 
 If a scan for that organization is already `queued` or `running`, the response is **200** with that same scan and `joined_existing` true. The client attaches to it. This is not a 409.
 
-**Errors:** 401, 403, 404 if the organization does not exist, 429 `SCAN_RATE_LIMITED` when the caller is starting scans faster than `FR-SCAN-06` allows.
+**Errors:** 401, 403, 404 if the organization does not exist, 400 `VALIDATION_ERROR` with `details.tracking_status` `inactive` when the organization is not `active` and no scan is already `queued`/`running`, 429 `SCAN_RATE_LIMITED` when the caller is starting scans faster than `FR-SCAN-06` allows.
 
-**Validation:** `organization_id` must be a UUID of a tracked organization.
+**Validation:** `organization_id` must be a UUID of a tracked organization. Starting a **new** scan requires `tracking_status = active`. If a scan is already `queued` or `running`, the client may still attach (`joined_existing` true) even if tracking was set inactive after the scan started.
 
 ### 9.2 Scan All
 
@@ -602,7 +721,9 @@ Any other `scope` is 400. There is no body that accepts an arbitrary URL or an u
 
 **MVP meaning of `all_tracked`:** every organization with `tracking_status = active`. Inactive seeded organizations are skipped. When another organization is set active, the same call includes it.
 
-**MVP behavior:** discovery-only — propose candidates via the LLM adapter, validate on the backend, upsert `organization_sources`. Does not fetch page bodies for signals yet.
+**MVP behavior:** propose candidates via the LLM adapter, validate on the backend, upsert `organization_sources`, collect approved pages (and news articles) into `documents`, collect matched SAM.gov notices into `documents`, then extract validated signals with evidence (`AI_RAG_DESIGN.md` §§3–5). Correlation and scoring are not in this slice yet.
+
+`document_count` on an organization source row is the number of stored documents linked to that page, including news articles linked from a hub.
 
 **202**
 
@@ -668,7 +789,7 @@ Each id is a scan for one **active** organization. Organizations that already ha
 
 **200:** page of scan summaries.
 
-Used by the header scan indicator and the organization "last scanned" context. The latest row for the whole system is `offset=0&limit=1`.
+Used by the header scan indicator and the organization "last scanned" context. The latest row for the whole system is `offset=0&limit=1`. The dashboard shows a short line under Scan Now as "Last scan: <time>" (no requester email or long status text on that caption), and reattaches to that batch if it is still running.
 
 ---
 
@@ -880,10 +1001,11 @@ The server never trusts a client-sent role, score, evidence URL, or organization
 |---|---|
 | Login, logout, password, token refresh | Clerk |
 | Role assignment | A database row during the hackathon |
-| Create or edit organization, signal, or opportunity | Read-only intelligence. Changes come from scans |
+| Create or edit signal or opportunity | Read-only intelligence. Changes come from scans |
+| Delete organization | Managers set `tracking_status` to `inactive` instead |
 | Unbounded open-web organization discovery (any domain) | Out of MVP |
 | CRM, email, or notification endpoints | Out of MVP |
-| A free-form URL ingest endpoint | Collection is the scan pipeline and the source register |
+| A free-form URL ingest endpoint for arbitrary pages or third-party sources | Collection is the scan pipeline and the source register in `DATA_SOURCES.md`. Managers may set only the organization's official `website_url` (§6.4–§6.5) and same-host official page URLs (§6.3a) |
 | Trusting LLM-proposed URLs without backend validation | Forbidden. MVP discovery proposes; validation stores |
 | Portfolio-wide Advisor with no scope | `AI_RAG_DESIGN.md` §23 |
 

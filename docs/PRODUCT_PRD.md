@@ -502,10 +502,11 @@ conversation.
 - `FR-SCAN-02` — A scan MUST eventually run the full pipeline: collect from approved sources →
   extract signals → validate → deduplicate/cluster → correlate → generate or update opportunities →
   recalculate scores → produce explanations and recommended actions.
-  **MVP interim (discovery-only):** until later phases land, Scan All / dashboard Scan Now for
-  `tracking_status = active` organizations MAY complete after LLM-assisted candidate proposal,
-  backend URL validation, and persistence into `organization_sources`. Later phases add collection
-  and downstream stages without changing this requirement's end state.
+  **MVP interim (discovery and collection):** until later phases land, Scan All / dashboard Scan
+  Now for `tracking_status = active` organizations MAY complete after LLM-assisted candidate
+  proposal, backend URL validation, persistence into `organization_sources`, and collection of those
+  official pages (including the organization's own news articles) into `documents`. Later phases add
+  signal extraction and the downstream stages without changing this requirement's end state.
 - `FR-SCAN-03` — The user MUST see that the scan is running and which stage it has reached. The
   interface MUST NOT appear frozen.
 - `FR-SCAN-04` — On completion, the user MUST see what changed: new signals, updated signals, new
@@ -595,7 +596,9 @@ opportunity details (§18), signal details (§19), search and filter (§20), Sca
 A three-developer team has roughly five working days. The MVP is therefore deliberately bounded:
 a limited set of tracked organizations rather than open-ended discovery, a small number of
 approved sources rather than broad coverage, one scan path used by both manual and scheduled runs,
-and read-only intelligence with no editing workflows. The tracked set is 10–20 organizations,
+and read-only intelligence for signals and opportunities (no editing of those rows). Managers may
+create and update organization identity and tracking status after live website validation
+(`FR-ORG-09`, `FR-ROLE-05`). The tracked set is 10–20 organizations,
 selected for observable activity across several signal types (§6).
 
 ---
@@ -679,6 +682,9 @@ ownership or assignment filter in the MVP.
 | View dashboard | Yes | Yes |
 | Search and open every tracked organization | Yes | Yes |
 | View organization profile | Yes | Yes |
+| Create or update organization identity (name, type, state, official website) | No | Yes |
+| Add or reject official same-domain page sources | No | Yes |
+| Activate or deactivate tracking | No | Yes |
 | View signals and evidence | Yes | Yes |
 | View opportunities, scores, explanations | Yes | Yes |
 | Use the AI Sales Advisor | Yes | Yes |
@@ -686,8 +692,7 @@ ownership or assignment filter in the MVP.
 | View portfolio-wide metrics across all tracked organizations | Yes | Yes |
 | View competitor/vendor intelligence summary | Yes | Yes |
 
-For the MVP the two roles see the same intelligence. The role exists so authorization is real and
-so assignment can be added later without redesigning identity. No manager-only screen is in scope.
+For the MVP both roles see the same intelligence. Organization **identity** writes are manager-only so the tracked set stays curated. There is still no separate manager-only screen — Add/Edit/Activate controls appear on the shared Organizations pages for managers only (`UI_UX_DESIGN.md`).
 
 - `FR-ROLE-01` — Every user MUST have exactly one role: `SALES_REP` or `SALES_MANAGER`.
 - `FR-ROLE-02` — Authorization MUST be enforced server-side on every protected operation,
@@ -696,6 +701,17 @@ so assignment can be added later without redesigning identity. No manager-only s
   system does not show a manager a different set of facts.
 - `FR-ROLE-04` — List and detail queries MUST NOT filter organizations, signals, or opportunities
   by the calling user. Assignment is out of MVP scope.
+- `FR-ROLE-05` — Only `SALES_MANAGER` MAY create or update organization identity fields and
+  `tracking_status`. `SALES_REP` MUST receive `403 INSUFFICIENT_PERMISSION` on those write
+  operations.
+- `FR-ORG-09` — Before creating or changing an organization's `website_url`, the system MUST
+  live-validate that the official public website is reachable over HTTPS (or HTTP redirecting to
+  HTTPS), is not gated by login/CAPTCHA/paywall markers checked by the fetcher, and store the
+  final URL after redirects. A failed validation MUST NOT write or update the row.
+- `FR-ORG-10` — Only `SALES_MANAGER` MAY add an official same-domain page URL to an organization
+  (`organization_sources`). The URL MUST pass the same live validation as `FR-ORG-09` and MUST
+  stay on the organization's official host. Registry APIs (SAM.gov, IPEDS, USAspending) MUST NOT
+  be added through this path.
 
 ---
 

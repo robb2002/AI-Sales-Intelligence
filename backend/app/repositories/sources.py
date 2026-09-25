@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Text, Uuid, func, text
+from sqlalchemy import CheckConstraint, DateTime, Text, Uuid, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.repositories.base import Base
@@ -32,3 +33,7 @@ class Source(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+async def get_by_key(session: AsyncSession, source_key: str) -> Source | None:
+    return await session.scalar(select(Source).where(Source.source_key == source_key))
