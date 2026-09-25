@@ -67,6 +67,16 @@ class ValidationAppError(AppError):
     code = "VALIDATION_ERROR"
     message = "The request is not valid."
 
+
+class ConflictError(AppError):
+    status_code = 409
+    code = "CONFLICT"
+    message = "The request conflicts with an existing resource."
+
+    def __init__(self, field: str, message: str | None = None) -> None:
+        super().__init__(message or self.message, {"field": field})
+
+
 def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 

@@ -131,14 +131,14 @@ Country is not a column. The product is United States only (`AGENTS.md` §3).
 
 ## 5. sources
 
-One row per approved origin. Website entries are added only after `DATA_SOURCES.md` §5.3. SAM.gov, USAspending, and IPEDS are the first three rows.
+One row per approved origin listed in `DATA_SOURCES.md`. Today that is SAM.gov, USAspending, and IPEDS only. Named organization websites are added only when a human writes them into `DATA_SOURCES.md` §5.3 — never as auto-created `website:<organization_id>` rows.
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
 | `source_id` | uuid | no | Primary key |
-| `source_key` | text | no | Unique. `sam_gov`, `usaspending`, `ipeds`, or `website:<organization_id>` |
-| `name` | text | no | Evidence `source_name` |
-| `official_url` | text | no | Registry entry URL |
+| `source_key` | text | no | Unique. Registry keys such as `sam_gov`, `usaspending`, `ipeds`. Future §5.3 sites use a stable key from that register |
+| `name` | text | no | Evidence `source_name` for API/file origins |
+| `official_url` | text | no | Registry entry URL from `DATA_SOURCES.md` |
 | `source_kind` | text | no | `official_api`, `official_data_file`, `official_website` |
 | `reliability_label` | text | yes | `official_api` or `official_website`. Null for IPEDS, which is not scored |
 | `created_at` | timestamptz | no | |
@@ -146,13 +146,34 @@ One row per approved origin. Website entries are added only after `DATA_SOURCES.
 
 **Constraints:** `source_kind` check. `reliability_label` null or one of the two scored labels in `DATA_SOURCES.md` §6.
 
-Website **page** URLs discovered during MVP Scan All are **not** stored as many `sources` rows. They live in `organization_sources` (§5a). The registry row `website:<organization_id>` remains the origin entry for later document collection.
+**Decided 2026-09-24.** The organization's main site URL lives on `organizations.website_url`. Discovered page URLs live in `organization_sources` (§5a). Website documents do **not** require a `sources` row.
+
+---
+
+## 5b. source_request_log
+
+Outbound calls to registry APIs so the application can enforce the SAM.gov safeguard of 10 requests per 24 hours (`DATA_SOURCES.md` §2.4). This is not a product-facing table.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `request_id` | uuid | no | Primary key |
+| `source_key` | text | no | e.g. `sam_gov` |
+| `requested_at` | timestamptz | no | |
+| `http_status` | integer | yes | |
+| `outcome` | text | no | `ok`, `error`, `quota_blocked`, `rejected` |
+| `detail` | text | yes | Safe reason. Never the API key |
+
+**Indexes:** `(source_key, requested_at)`.
+
+**Constraints:** `outcome` check. Counts toward the daily cap use `ok`, `error`, and `rejected` only — a `quota_blocked` row records that the app refused to call out.
 
 ---
 
 ## 5a. organization_sources
 
-Validated official **page** URLs for a tracked organization. Used by MVP discovery-only Scan All. Content fetch (Phase 4) reads approved rows here; it does not invent URLs.
+Validated official **page** URLs for a tracked organization. Used by MVP discovery Scan and by
+manager-added same-domain pages (`API_CONTRACT.md` §6.3a). Content fetch reads approved rows here;
+it does not invent URLs.
 
 | Column | Type | Null | Notes |
 |---|---|---|---|
@@ -160,8 +181,9 @@ Validated official **page** URLs for a tracked organization. Used by MVP discove
 | `organization_id` | uuid | no | Foreign key to `organizations` |
 | `url` | text | no | Final validated URL after redirects. Never an LLM-only string |
 | `source_title` | text | yes | Short title from discovery or the page |
-| `page_category` | text | no | Page category for discovery UI only — not a new signal type. Values: `procurement`, `technology`, `digital_learning`, `assessment`, `funding`, `leadership`, `strategic_initiative`, `partnership` |
+| `page_category` | text | no | Page category for discovery UI only — not a new signal type. Values: `procurement`, `technology`, `digital_learning`, `assessment`, `funding`, `leadership`, `strategic_initiative`, `partnership`, `news` (the organization's own news hub, `DATA_SOURCES.md` §5.2b) |
 | `status` | text | no | `approved` or `rejected` |
+| `extraction_status` | text | no | `pending`, `extracting`, `extracted`, `failed`. Default `pending`. `failed` means the page had no readable text without JavaScript |
 | `is_official` | boolean | no | True when the final host is the org domain or a subdomain |
 | `rejection_reason` | text | yes | Set when `status` is `rejected` |
 | `last_validated_at` | timestamptz | no | Last successful validation attempt |
@@ -170,9 +192,9 @@ Validated official **page** URLs for a tracked organization. Used by MVP discove
 
 **Indexes:** `(organization_id)`, `(status)`, unique `(organization_id, url)`.
 
-**Constraints:** `page_category` check. `status` check. `url` not empty.
+**Constraints:** `page_category` check. `status` check. `extraction_status` check. `url` not empty.
 
-Re-running discovery upserts on `(organization_id, url)` and refreshes `source_title`, `page_category`, `status`, `last_validated_at`. It does not insert duplicates.
+Re-running discovery upserts on `(organization_id, url)` and refreshes `source_title`, `page_category`, `status`, `last_validated_at`. It does not insert duplicates. `url` is the exact final URL that was fetched; a `www` or trailing-slash variant of the same page is replaced, not kept as a second row.
 
 ---
 
@@ -183,8 +205,9 @@ The bytes that were actually fetched (`FR-DATA-05`).
 | Column | Type | Null | Notes |
 |---|---|---|---|
 | `document_id` | uuid | no | Primary key |
-| `source_id` | uuid | no | Foreign key to `sources` |
+| `source_id` | uuid | yes | Foreign key to `sources`. Required for SAM.gov, USAspending, and IPEDS. Null for website documents — those use `organization_id` + `organization_source_id` and the org root on `organizations.website_url` |
 | `organization_id` | uuid | yes | Foreign key. Null until a SAM.gov or USAspending record is matched. Required for a website fetch |
+| `organization_source_id` | uuid | yes | Foreign key to `organization_sources`, `ON DELETE SET NULL`. The approved page this document came from. For a news article it is the news hub that linked to it. Null for SAM.gov and USAspending |
 | `external_id` | text | yes | `noticeId`, award id, or UnitID when the source has one |
 | `source_url` | text | no | URL that was fetched. Not a model string. No API key |
 | `title` | text | yes | |
@@ -193,14 +216,16 @@ The bytes that were actually fetched (`FR-DATA-05`).
 | `published_on` | date | yes | Null means unavailable |
 | `http_status` | integer | yes | |
 | `data_origin` | text | no | `live` or `cached` |
-| `retrieved_at` | timestamptz | no | Original fetch time, including cached rows |
+| `retrieved_at` | timestamptz | no | Time of the fetch that produced the stored body. For cached rows, the original fetch time |
 | `created_at` | timestamptz | no | |
 
-**Indexes:** `(source_id, external_id)` unique where `external_id` is not null. `(source_id, content_hash)` so an unchanged document is not re-embedded. `(organization_id)`.
+**Indexes:** `(source_id, external_id)` unique where `external_id` is not null. `(organization_id, source_url)` unique where `external_id` is null and `organization_id` is not null: one current website document per organization and URL. `(source_id, content_hash)` so an unchanged document is not re-embedded. `(organization_id)`. `(organization_source_id)`.
 
-**Constraints:** `data_origin` check. `body_text` length greater than 0.
+**Constraints:** `data_origin` check. `body_text` length greater than 0. At least one of `source_id` or `organization_source_id` is set.
 
-A repeated hash does not insert a second document. The existing row stays the parent of chunks and evidence.
+**Decided 2026-09-24.** A website page has one current document per organization and URL. An unchanged body (same hash) changes nothing. A changed body updates that same row in place (`body_text`, `content_hash`, `title`, `published_on`, `http_status`, `retrieved_at`), so `document_id` stays stable; its chunks are deleted and rebuilt, and it is extracted again. Website evidence later uses the organization name / page title for `source_name` and the `official_website` reliability label from `DATA_SOURCES.md` §6 — not a per-org `sources` row.
+
+When evidence exists (signal phase): if an `evidence` row points at the old body, the old version is kept as history instead of being overwritten, marked not current, and is never used for new extraction or Advisor retrieval. The signal it supports may move to `superseded` if the new body no longer supports it. That rule adds an `is_current` flag and narrows the unique index to current rows; it is added with the evidence table, not before.
 
 ---
 
@@ -226,7 +251,7 @@ One row per chunk. The embedding is a column on that row, not another table.
 | `retrieved_at` | timestamptz | no | Copied from the document |
 | `created_at` | timestamptz | no | |
 
-**N is not chosen here.** It is the output width of the embedding model, which stays deferred until hosting is chosen (`TECHNICAL_PRD.md` §5.4). The migration that adds this column must set N to that width. Do not pick 768, 1024, or 1536 in advance.
+**N = 1536** for Azure `text-embedding-3-small` (**Updated 2026-09-25**, B1). Changing the embedding model/width requires a new migration and a full re-index.
 
 **Indexes:** `(organization_id)`, `(document_id, chunk_index)` unique, `(signal_id)`.
 
@@ -282,7 +307,7 @@ This table is the signal source reference. It is also what the Advisor cites.
 | `signal_id` | uuid | yes | Foreign key. Set when the snippet supports a signal. Advisor-only citations of a reference chunk may leave this null |
 | `document_id` | uuid | no | Foreign key |
 | `chunk_id` | uuid | yes | Foreign key when the snippet is a chunk |
-| `source_id` | uuid | no | Foreign key to `sources` |
+| `source_id` | uuid | yes | Foreign key to `sources`. Set for SAM.gov / USAspending / IPEDS documents. Null for website documents (source name resolved from the organization) |
 | `source_url` | text | no | Copied from the document. Must not contain a query key named `api_key` |
 | `published_on` | date | yes | |
 | `snippet` | text | no | Verbatim substring of `documents.body_text` for that `document_id` |
@@ -297,7 +322,7 @@ This table is the signal source reference. It is also what the Advisor cites.
 
 A merge copies nothing away. Additional evidence rows point at the surviving `signal_id`. Old rows are not deleted (`FR-EV-04`).
 
-`source_name` in the API is `sources.name` through `source_id`. It is not copied onto every evidence row.
+`source_name` in the API is `sources.name` through `document.source_id` when that FK is set (SAM.gov, USAspending, IPEDS). For website documents (`source_id` null), it is the organization name or page title from `organization_sources`. It is not copied onto every evidence row.
 
 ---
 
@@ -417,6 +442,7 @@ Batch status in the API is derived from child runs, not stored.
 | `batch_id` | uuid | yes | Foreign key. Null for Scan Now |
 | `organization_id` | uuid | no | Foreign key |
 | `trigger` | text | no | `manual` or `scheduled` |
+| `requested_by_user_id` | uuid | yes | Foreign key to `app_users`, `ON DELETE SET NULL`. The signed-in user who started a manual scan. Null for scheduled scans and for runs created before this column |
 | `status` | text | no | API scan status |
 | `stage` | text | yes | API scan stage. Null when queued or finished |
 | `sources` | jsonb | no | Array of `{source_name, status, detail}`. Default `[]` |
@@ -427,6 +453,7 @@ Batch status in the API is derived from child runs, not stored.
 | `candidates_found` | integer | no | Default 0. MVP discovery count |
 | `sources_approved` | integer | no | Default 0. MVP discovery count |
 | `sources_rejected` | integer | no | Default 0. MVP discovery count |
+| `documents_collected` | integer | no | Default 0. Documents inserted or replaced because their content changed in this run. Unchanged pages add 0 |
 | `error_detail` | text | yes | Safe failure summary. Never secrets |
 | `started_at` | timestamptz | yes | |
 | `finished_at` | timestamptz | yes | |
@@ -541,7 +568,7 @@ The database holds the foreign keys and the checks above. These rules stay in th
 
 | # | Item | Status |
 |---|---|---|
-| B1 | Vector dimension N | **Decided 2026-09-23.** The embedding model stays pending behind an adapter. Set N in the migration only after `EMBEDDING_MODEL` is chosen. This document does not pick a number |
+| B1 | Vector dimension N | **Updated 2026-09-25.** Azure OpenAI `text-embedding-3-small` via embedding adapter → `vector(1536)`. Chat remains Azure `interns-gpt-4.1`. Local/Groq embedding defaults removed. |
 | B2 | ANN index | **Deferred.** Exact search until volume says otherwise |
 | B3 | `evidence_ids` as `uuid[]` | **Chosen** to avoid a junction table. The application must reject unknown ids. A junction is only worth adding if that check is skipped |
 | B4 | IPEDS column names inside `ipeds_attributes` | Still `NEEDS VERIFICATION` in `DATA_SOURCES.md` D5. The jsonb array can hold them without a schema change |

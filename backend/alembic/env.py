@@ -7,10 +7,19 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
 from app.repositories import (  # noqa: F401  registers tables on Base.metadata
+    advisor_sessions,
+    ai_interactions,
     app_users,
+    document_chunks,
+    documents,
+    evidence,
+    opportunities,
+    opportunity_scores,
     organization_sources,
     organizations,
     scans,
+    signals,
+    source_requests,
     sources,
 )
 from app.repositories.base import Base

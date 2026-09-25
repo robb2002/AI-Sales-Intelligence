@@ -25,6 +25,7 @@ class OrganizationSourceItem(BaseModel):
     page_category: str
     status: str
     extraction_status: str
+    document_count: int = 0
     is_official: bool
     rejection_reason: str | None
     last_validated_at: datetime
@@ -52,9 +53,11 @@ class ScanSourceResult(BaseModel):
 
 class ScanSummary(BaseModel):
     scan_id: UUID
+    batch_id: UUID | None = None
     organization_id: UUID
     organization_name: str
     trigger: str
+    requested_by_email: str | None = None
     status: str
     stage: str | None
     started_at: datetime | None
@@ -62,12 +65,19 @@ class ScanSummary(BaseModel):
     candidates_found: int = 0
     sources_approved: int = 0
     sources_rejected: int = 0
+    documents_collected: int = 0
     joined_existing: bool = False
+
+
+class ScanSummaryPage(BaseModel):
+    data: list[ScanSummary]
+    total: int
+    limit: int
+    offset: int
 
 
 class ScanDetail(ScanSummary):
     sources: list[ScanSourceResult] = Field(default_factory=list)
-    batch_id: UUID | None = None
     error_detail: str | None = None
     changes: dict = Field(default_factory=dict)
 

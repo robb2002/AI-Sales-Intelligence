@@ -328,21 +328,13 @@ receives write access to the database independent of a service.
 
 ### 5.4 Embeddings
 
-An open-source embedding model, accessed through the same AI service abstraction so that the
-deployment mechanism can change without touching callers.
+Embeddings are accessed through the embedding adapter so the deployment can change without touching
+callers.
 
-> **Decided 2026-09-23.** The embedding model stays pending. Callers use the embedding adapter, so
-> a later model choice does not change the database design or the business logic.
-> `DATABASE_DESIGN.md` must not freeze the pgvector dimension until that model is chosen. The two
-> options, kept so the later choice has its trade-off already written down:
->
-> | Option | Pros | Cons |
-> |---|---|---|
-> | In-process (`sentence-transformers`) | No external dependency, no per-call cost or rate limit, works offline | Adds hundreds of MB of RAM and model download to the backend image; may exceed a free hosting tier |
-> | Hosted inference API for an open-source model | Small backend footprint, fast cold start | External dependency and rate limits on the ingestion path |
->
-> The selected model fixes the vector dimension. Until then the embedding column is specified as
-> "dimension = model output width" and is not given a number.
+> **Decided 2026-09-25 (updated).** Hosted Azure OpenAI embeddings on the same resource/key as
+> chat. Model: `text-embedding-3-small` (deployment name in `EMBEDDING_MODEL`), vector width
+> **1536**. Chat stays `interns-gpt-4.1`. Local/Groq embedding paths were removed from the default
+> product path. Switching width requires a migration and a full re-index.
 
 ### 5.5 LangChain, used narrowly
 
@@ -487,7 +479,7 @@ new collector (`FR-DATA-02`, `FR-DATA-04`).
 | 1 | Official API | SAM.gov, USAspending.gov — structured, documented, preferred |
 | 2 | Public data file / feed | IPEDS reference data (`FR-DATA-07`: enrichment only) |
 | 3 | Requests + BeautifulSoup | Static pages on approved official organization websites |
-| 3a | `httpx` (async) | Async outbound HTTP for URL validation and the Azure OpenAI adapter (AD-07). Does not replace Requests/BeautifulSoup for HTML collection |
+| 3a | `httpx` (async) | Async outbound HTTP for URL validation, website page fetch, and the Azure OpenAI adapter (AD-07). It is the async stand-in for Requests inside the FastAPI process. BeautifulSoup still does all HTML parsing. No browser-impersonation client and no second extraction library |
 | 4 | Playwright | Only where a page genuinely requires JavaScript rendering |
 
 Playwright is a last resort because it multiplies the deployment footprint (a browser binary in
@@ -702,9 +694,16 @@ Names and purposes only; values are never recorded in this repository.
 | `EMBEDDING_MODEL` | Backend | Open-source embedding model identifier |
 | `EMBEDDING_API_URL` | Backend | Only if hosted embeddings are chosen (§5.4) |
 | `SAM_GOV_API_KEY` | Backend | SAM.gov data service credential |
+| `SAM_GOV_SEARCH_URL` | Backend | Documented Get Opportunities search URL. Default `https://api.sam.gov/opportunities/v2/search`. Switch to the `/prod/` path only after a keyed `200` (`DATA_SOURCES.md` D1) |
+| `SAM_GOV_DAILY_REQUEST_CAP` | Backend | Application safeguard (default 10). Not SAM.gov's official quota |
+| `SAM_GOV_SEARCH_LIMIT` | Backend | Max notices per search page (default 25, max 1000) |
 | `SCAN_SCHEDULE_CRON` | Backend | Scheduled sweep cadence (§9) |
-| `SCAN_MAX_CONCURRENT_SOURCES` | Backend | Politeness bound (§7.4) |
+| `SCAN_MAX_CONCURRENT_SOURCES` | Backend | Politeness bound (§7.4). Max website requests in flight at once, across hosts |
 | `SCAN_ORG_CONCURRENCY` | Backend | Max concurrent organization discovery runs inside one Scan All batch |
+| `SCAN_MAX_PAGES_PER_ORGANIZATION` | Backend | Cap on approved pages validated and collected per organization per scan (default 10) |
+| `SCAN_NEWS_ARTICLES_PER_HUB` | Backend | Articles collected from an organization's own news hub per scan (default 5, `DATA_SOURCES.md` §5.2b) |
+| `SCAN_REFRESH_HOURS` | Backend | A page collected within this window is reused, not fetched again. Default 0: every Scan Now fetches live. Scheduled scans use 24 |
+| `HTTP_TIMEOUT_SECONDS` | Backend | Read timeout for website requests (default 15; connect timeout 10) |
 | `HTTP_USER_AGENT` | Backend | Honest client identification (§8.3) |
 | `ENABLE_FALLBACK_DATASET` | Backend | Whether cached fallback may be read (§7.6) |
 | `VITE_API_BASE_URL` | Frontend | Backend base URL, build-time |
@@ -1158,7 +1157,7 @@ should be settled before implementation begins. Sequencing is owned by `IMPLEMEN
 
 | # | Question | Section | Blocks | Recommendation |
 |---|---|---|---|---|
-| T1 | Embedding model deployment: in-process or hosted API? | §5.4 | — | **Decided 2026-09-23.** Model stays pending, behind the embedding adapter. Do not invent a dimension |
+| T1 | Embedding model deployment: in-process or hosted API? | §5.4 | — | **Decided 2026-09-25.** Hosted Azure OpenAI `text-embedding-3-small`, width 1536; chat `interns-gpt-4.1` |
 | T2 | Backend and frontend hosting targets | §27 | Deployment | Must be a backend host that does not idle to zero |
 | T3 | ~~Supabase Auth or FastAPI-native?~~ | §10 | — | **Decided:** Clerk authenticates; FastAPI authorizes (AD-15) |
 | T4 | LLM provider selection | §5.1 | — | **Decided 2026-09-23.** Provider stays pending. Business logic uses the LLM adapter only |

@@ -193,7 +193,7 @@ Evidence URL:
 
 ### 2.3 Update frequency
 
-Poll at most once a day for active notices, matching GSA's daily update statement. A poll uses a `postedFrom`/`postedTo` window of one year or less. Do not page the full history. Archived notices are out of the daily poll. They are weekly on SAM.gov's side and are not required for the MVP.
+Poll at most once a day for active notices, matching GSA's daily update statement. A poll uses a `postedFrom`/`postedTo` window of **at most 364 days** (SAM rejects an exact 365-day inclusive span as more than one year). Do not page the full history. Archived notices are out of the daily poll. They are weekly on SAM.gov's side and are not required for the MVP.
 
 ### 2.4 Rate limits
 
@@ -391,7 +391,7 @@ All of these must be true before the URL is written into §5.3 and before any **
 4. The path is a bounded section (news, leadership, board, or technology), not the whole host and not a search-all crawl.
 5. A human records the URL, the section, the signal types that section might hold, and the date checked — **or**, for MVP discovery-only Scan All (§5.2a), the backend records an equivalent validation result into `organization_sources`.
 
-Until those five are recorded for **collection**, the URL is not an approved collection source in §5.3. Discovery storage (§5.2a) does not by itself authorize HTML fetch for signal extraction.
+Until those five are recorded for **collection**, the URL is not an approved collection source in §5.3, except under the interim rule in §5.2b.
 
 ### 5.2a MVP discovery-only Scan All (interim)
 
@@ -405,7 +405,23 @@ For the interim demo slice:
 4. The backend **must** validate each candidate: URL syntax, HTTP accessibility (safe redirects, with one retry on transient errors), final host on the official domain or subdomain, public access, and `robots.txt` for the path.
 5. Only candidates that pass are stored as `organization_sources` with `status = approved`. Upsert is on `(organization_id, url)` — no duplicates. Previously approved URLs are not demoted to rejected on transient network errors.
 6. The LLM is never the final authority. Invented or third-party URLs are dropped before validation.
-7. Content ingestion, chunks, embeddings, and signals are **out of this slice**.
+7. Chunks, embeddings, and signals are **out of this slice**.
+
+### 5.2b MVP page collection (interim)
+
+**Decided 2026-09-24.** Until §5.3 is filled by hand, an approved `organization_sources` row is the collection allowlist for that organization. The same Scan collects those pages into `documents`:
+
+1. The page HTML fetched during validation (§5.2a step 4) is the page that is stored. It is not fetched a second time in the same scan.
+2. One approved page per organization may be the organization's own **news hub** (`page_category` `news`, for example `news.asu.edu` or `ucf.edu/news`). It is still an official page on the organization's domain. Third-party news sites stay forbidden (§1).
+3. From a news hub, the scan also collects up to `SCAN_NEWS_ARTICLES_PER_HUB` article pages (default 5) that the hub itself links to, on the same host, in the order the hub lists them. Article URLs come only from the fetched hub HTML. Nothing else is followed. This is the "documented next-page link on the same host" in §5.4, not a crawl.
+4. Every request follows §5.4: `robots.txt` first, at least five seconds between requests to the same host (longer if `crawl-delay` says so), the honest `HTTP_USER_AGENT`, same-domain redirects only. A 403 or 429 is recorded and not retried with another client or user agent. Different hosts run in parallel.
+5. **Updated 2026-09-24.** Scan Now is user-triggered and fetches live pages every time (`SCAN_REFRESH_HOURS` default 0), so a demo always shows the site as it is now. Within one scan each page is still fetched once, the five-second host gap still applies, and only one scan per organization runs at a time. A scheduled scan, if built, sets `SCAN_REFRESH_HOURS` to 24 to keep the "one fetch per page per daily scan" rule; a page collected (or found unreadable) inside that window is then reused.
+6. A page whose text only appears after JavaScript runs is recorded as not collectable (`extraction_status` `failed`). Playwright is not used for it.
+7. `published_on` is set only when the page states a date (meta tags or structured data; the `<time>` tag on article pages). Otherwise it stays null. The scan never substitutes today's date.
+8. Each organization and URL has one current document. An unchanged page changes nothing. A changed page replaces the stored text in place, so the database shows what the site says now (`DATABASE_DESIGN.md` §6). An older version is kept only when stored evidence points at it.
+9. **Decided 2026-09-24.** Website collection does not insert rows into `sources`. That table holds only origins listed in this document (today `sam_gov`, `usaspending`, `ipeds`). The organization root URL is `organizations.website_url`. Approved pages are `organization_sources`. Website `documents` leave `source_id` null.
+
+**Decided 2026-09-24 (Scan Now multi-source).** The same Scan All / Scan Now run collects website pages and SAM.gov notices in parallel. SAM.gov uses one shared search for the batch (plus at most a few documented `title` searches when an org matched nothing), under the application cap of 10 requests / 24 hours. Notices are matched to `organizations.name` locally; unmatched notices are not stored. Matched notices become `documents` with `source_id` = SAM.gov, `organization_id` set, and `external_id` = `noticeId`. Description downloads are out of this slice (each is another request). USAspending and IPEDS are not part of this parallel loop yet.
 
 ### 5.3 Approved website register
 
@@ -415,7 +431,7 @@ No organization website is approved yet.
 |---|---|---|---|---|---|
 | — | — | — | — | — | — |
 
-> **Decided 2026-09-23.** Start with two TARGET organizations, each added only after real evidence. §5.3 stays empty until a human validates each row. Collection code that fetches a URL not in this table is a defect.
+> **Decided 2026-09-23.** Start with two TARGET organizations, each added only after real evidence. §5.3 stays empty until a human validates each row. Collection code that fetches a URL not in this table, and not allowed by the interim rule in §5.2b, is a defect.
 
 ### 5.4 How a site is collected
 

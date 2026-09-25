@@ -12,9 +12,17 @@ const ROUTE_TITLES: Record<string, string> = {
   '/advisor': 'AI Sales Advisor',
 }
 
+function titleForPath(pathname: string): string {
+  if (pathname in ROUTE_TITLES) return ROUTE_TITLES[pathname]
+  if (pathname.startsWith('/organizations/')) return 'Organization'
+  if (pathname.startsWith('/signals/')) return 'Signal detail'
+  if (pathname.startsWith('/opportunities/')) return 'Potential Opportunity'
+  return 'Page not found'
+}
+
 export function AppShell({ user }: { user: CurrentUser }) {
   const { pathname } = useLocation()
-  const title = ROUTE_TITLES[pathname] ?? 'Page not found'
+  const title = titleForPath(pathname)
   useDocumentTitle(title)
 
   return (
