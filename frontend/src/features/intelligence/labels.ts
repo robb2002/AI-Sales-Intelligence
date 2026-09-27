@@ -78,6 +78,7 @@ export const ORG_TYPE_LABELS: Record<string, string> = {
   college: 'College',
   k12_district: 'K-12 district',
   public_sector_education: 'Public-sector education',
+  edtech_company: 'EdTech company',
 }
 
 export function formatSignalDate(date: string | null, dateStatus: string): string {

@@ -611,7 +611,7 @@ long-term value; each is excluded because it does not serve the one-week MVP.
 | Excluded | Why deferred |
 |---|---|
 | Full CRM integration | Requires a target CRM, credentials, and field mapping; consumes the week without improving the intelligence itself |
-| Email automation | Outreach is a different product; the MVP ends at recommending research/action |
+| Email automation | Outreach is a different product; the MVP ends at recommending research/action. **Amended 2026-09-26:** the Sales Persona may write draft email text for the rep to copy (`AI_RAG_DESIGN.md` §23a). Sending, sequencing, and mailbox integration stay out |
 | LinkedIn automation | Outreach, plus platform terms that conflict with our collection constraints |
 | Large-scale internet crawling | Explicitly prohibited; collection is targeted at approved sources |
 | Mobile application | A second client for a desktop research workflow |

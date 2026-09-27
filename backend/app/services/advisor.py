@@ -40,6 +40,14 @@ _OUT_OF_SCOPE_PATTERNS = (
     re.compile(r"\b(canada|uk|united kingdom|europe|india|australia)\b", re.I),
 )
 
+_UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+# Internal ids the model sometimes writes into prose: "(chunk_ids: <uuid>, ...)" or bare uuids.
+_BRACKETED_ID_RE = re.compile(rf"\s*[(\[][^()\[\]]*?{_UUID}[^()\[\]]*?[)\]]")
+_LABELLED_ID_RE = re.compile(
+    rf"\s*\bchunk[_ ]?ids?\b\s*[:=]?\s*{_UUID}(?:\s*,\s*{_UUID})*", re.I
+)
+_BARE_ID_RE = re.compile(rf"\s*{_UUID}")
+
 _INSUFFICIENT_TEXT = (
     "Insufficient evidence in collected sources for this organization. "
     "Run a scan or ask about signals and documents already stored."
@@ -240,7 +248,7 @@ async def ask(
 
     for seg in raw.get("segments") or []:
         layer = seg.get("content_layer") or "interpretation"
-        text = (seg.get("text") or "").strip()
+        text = _strip_internal_ids(seg.get("text") or "")
         if not text:
             continue
         raw_ids = [cid for cid in (seg.get("chunk_ids") or []) if cid in allowed_chunk_ids]
@@ -485,16 +493,30 @@ async def _finish(
     )
 
 
+def _strip_internal_ids(text: str) -> str:
+    """Remove chunk ids / UUIDs that must never be shown to a user."""
+    text = _BRACKETED_ID_RE.sub("", text)
+    text = _LABELLED_ID_RE.sub("", text)
+    text = _BARE_ID_RE.sub("", text)
+    text = re.sub(r"\s+([.,;:])", r"\1", text)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
+_LAYER_ORDER = ("fact", "interpretation", "potential_opportunity", "recommended_action")
+_LAYER_PREFIX = {
+    "interpretation": "Interpretation: ",
+    "potential_opportunity": "Potential opportunity: ",
+    "recommended_action": "Recommended research: ",
+}
+
+
 def _compose_answer_text(segments: list[AdvisorSegment]) -> str:
-    parts: list[str] = []
-    for seg in segments:
-        if seg.content_layer == "interpretation":
-            parts.append(f"Interpretation: {seg.text}")
-        elif seg.content_layer == "recommended_action":
-            parts.append(f"Recommended research: {seg.text}")
-        else:
-            parts.append(seg.text)
-    return "\n\n".join(parts)
+    """One bullet per segment: facts first, then interpretation, then next steps."""
+    rank = {layer: i for i, layer in enumerate(_LAYER_ORDER)}
+    ordered = sorted(segments, key=lambda s: rank.get(s.content_layer, len(rank)))
+    return "\n".join(
+        f"• {_LAYER_PREFIX.get(seg.content_layer, '')}{seg.text}" for seg in ordered
+    )
 
 
 def _data_origin(passing: list) -> str:

@@ -25,12 +25,14 @@ import { useDocumentTitle } from '../../lib/useDocumentTitle'
 import type { ScanDetail } from '../../types/api'
 import { useCurrentUser } from '../auth/useCurrentUser'
 import { OrganizationFormModal } from './OrganizationFormModal'
+import { PeerCompetitorsCard } from './PeerCompetitorsCard'
 
 const TYPE_LABELS: Record<string, string> = {
   university: 'University',
   college: 'College',
   k12_district: 'K-12 district',
   public_sector_education: 'Public-sector education',
+  edtech_company: 'EdTech company',
 }
 
 const PAGE_CATEGORIES = [
@@ -535,6 +537,9 @@ export function OrganizationDetailPage() {
         </div>
 
         <aside className="space-y-4">
+          {org.market_role === 'target' && (
+            <PeerCompetitorsCard organizationId={org.organization_id} />
+          )}
           <Card className="p-4">
             <p className="text-label font-medium tracking-wide text-secondary uppercase">Coverage</p>
             <ul className="mt-3 space-y-2 text-body-sm text-primary">

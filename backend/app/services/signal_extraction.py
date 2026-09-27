@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,6 +109,10 @@ async def extract_organization_signals(
             continue
 
         result.processed_docs += 1
+        if org.market_role == "competitor":
+            # Everything a competitor publishes is competitive intelligence (type 6), never a
+            # procurement or funding signal about a customer.
+            candidates = [replace(c, signal_type="competitor_vendor") for c in candidates]
         for candidate in candidates:
             outcome = await _persist_candidate(
                 session, org=org, doc=doc, candidate=candidate

@@ -25,6 +25,7 @@ Primary keys are `uuid`. Timestamps are `timestamptz` stored in UTC. Closed sets
 | `app_users` | Clerk user id and the application role |
 | `organizations` | The 10–20 tracked institutions, plus IPEDS reference on the same row |
 | `sources` | Approved origins from `DATA_SOURCES.md` |
+| `organization_peer_competitors` | The saved top 5 peer competitors of one organization from the last Update (added 2026-09-26) |
 | `documents` | Raw fetched content, URL, hash, retrieval time |
 | `document_chunks` | Chunk text, citation metadata, and the embedding |
 | `signals` | One signal, including a cluster's surviving row and rejected rows |
@@ -104,7 +105,7 @@ Maps a Clerk identity to exactly one application role (`AUTHENTICATION.md` §9).
 |---|---|---|---|
 | `organization_id` | uuid | no | Primary key |
 | `name` | text | no | Stored official name. The model must not rename it |
-| `organization_type` | text | no | API enum: `university`, `college`, `k12_district`, `public_sector_education` |
+| `organization_type` | text | no | API enum: `university`, `college`, `k12_district`, `public_sector_education`, `edtech_company`. `edtech_company` is used only when `market_role` is `competitor` (added 2026-09-26; migration 0021) |
 | `market_role` | text | no | `target` or `competitor` (`DATA_SOURCES.md` target data model) |
 | `tracking_status` | text | no | `active` or `inactive`. MVP scans use `active` only |
 | `state_code` | char(2) | yes | USPS |
@@ -195,6 +196,33 @@ it does not invent URLs.
 **Constraints:** `page_category` check. `status` check. `extraction_status` check. `url` not empty.
 
 Re-running discovery upserts on `(organization_id, url)` and refreshes `source_title`, `page_category`, `status`, `last_validated_at`. It does not insert duplicates. `url` is the exact final URL that was fetched; a `www` or trailing-slash variant of the same page is replaced, not kept as a second row.
+
+---
+
+## 5c. organization_peer_competitors (added 2026-09-26)
+
+The top 5 peer competitors of a tracked organization, found by a web search when a user clicks
+Update (`DATA_SOURCES.md` §8, `API_CONTRACT.md` §6.6). Context for a rep. It is not a signal, is
+never scored, and never creates an opportunity.
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `peer_id` | uuid | no | Primary key |
+| `organization_id` | uuid | no | Foreign key to `organizations`, cascade delete |
+| `rank` | smallint | no | 1 to 5 |
+| `competitor_name` | text | no | Name as it appears in the search result title or snippet. The model may not rename it |
+| `source_title` | text | yes | Search result title |
+| `source_url` | text | no | The result link returned by the search API. Never a model-written URL |
+| `snippet` | text | no | Verbatim text from the search result that names the competitor |
+| `search_query` | text | no | The query that was sent |
+| `retrieved_at` | timestamptz | no | When the search ran |
+| `created_at` | timestamptz | no | |
+
+**Indexes:** unique `(organization_id, rank)`.
+
+**Constraints:** `rank` between 1 and 5. `snippet` and `competitor_name` not empty.
+
+Each Update replaces the whole set for that organization in one transaction, so a failed search keeps the previous list.
 
 ---
 

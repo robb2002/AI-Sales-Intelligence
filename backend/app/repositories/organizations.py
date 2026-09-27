@@ -7,7 +7,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.repositories.base import Base
 
-ORGANIZATION_TYPES = ("university", "college", "k12_district", "public_sector_education")
+ORGANIZATION_TYPES = (
+    "university",
+    "college",
+    "k12_district",
+    "public_sector_education",
+    "edtech_company",
+)
 MARKET_ROLES = ("target", "competitor")
 TRACKING_STATUSES = ("active", "inactive")
 
@@ -16,7 +22,8 @@ class Organization(Base):
     __tablename__ = "organizations"
     __table_args__ = (
         CheckConstraint(
-            "organization_type IN ('university', 'college', 'k12_district', 'public_sector_education')",
+            "organization_type IN ('university', 'college', 'k12_district', "
+            "'public_sector_education', 'edtech_company')",
             name="organizations_organization_type_check",
         ),
         CheckConstraint(

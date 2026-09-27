@@ -1,4 +1,5 @@
 import type {
+  MarketRole,
   OrganizationDetail,
   OrganizationSourceItem,
   OrganizationSourcePage,
@@ -30,6 +31,7 @@ export function listOrganizations(params?: {
   organization_type?: string[]
   state_code?: string[]
   tracking_status?: string[]
+  marketRole?: MarketRole[]
   sort?: string
   direction?: string
   limit?: number
@@ -40,6 +42,7 @@ export function listOrganizations(params?: {
   for (const value of params?.organization_type ?? []) search.append('organization_type', value)
   for (const value of params?.state_code ?? []) search.append('state_code', value)
   for (const value of params?.tracking_status ?? []) search.append('tracking_status', value)
+  for (const value of params?.marketRole ?? []) search.append('market_role', value)
   if (params?.sort) search.set('sort', params.sort)
   if (params?.direction) search.set('direction', params.direction)
   if (params?.limit != null) search.set('limit', String(params.limit))

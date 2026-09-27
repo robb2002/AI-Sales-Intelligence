@@ -43,6 +43,8 @@ The system may also track a smaller number of EdTech and assessment companies as
 
 TARGET organizations are the primary focus of opportunity detection. COMPETITOR signals must not automatically be treated as customer opportunities.
 
+**Seeded 2026-09-26 (migration 0021).** Five COMPETITOR organizations, organization type `edtech_company`, tracked `active`: Honorlock (`honorlock.com`), Proctorio (`proctorio.com`), Meazure Learning (`meazurelearning.com`), Caveon (`caveon.com`), Questionmark (`questionmark.com`). They go through the same website discovery, collection, and extraction as a TARGET organization (§5). Their signals are always type `competitor_vendor`, they never produce an opportunity, and they are not sent to SAM.gov title searches so the application cap stays for TARGET organizations.
+
 Organization type is a field on the organization record. §5.3 does not gain a new column for it.
 
 ### 1.1 Source priority
@@ -193,7 +195,7 @@ Evidence URL:
 
 ### 2.3 Update frequency
 
-Poll at most once a day for active notices, matching GSA's daily update statement. A poll uses a `postedFrom`/`postedTo` window of **at most 364 days** (SAM rejects an exact 365-day inclusive span as more than one year). Do not page the full history. Archived notices are out of the daily poll. They are weekly on SAM.gov's side and are not required for the MVP.
+Poll at most once a day for active notices, matching GSA's daily update statement. A poll uses a `postedFrom`/`postedTo` window of **at most 364 days** (SAM rejects an exact 365-day inclusive span as more than one year). Do not page the full history. The shared daily search asks for `limit=1000`, the documented maximum, so one request covers many notices for local matching against the tracked organizations. Archived notices are out of the daily poll. They are weekly on SAM.gov's side and are not required for the MVP.
 
 ### 2.4 Rate limits
 
@@ -549,6 +551,47 @@ That is the whole set. No fifth source.
 A reliable demo organization is one that, on a checked day, has either a matching SAM.gov notice or a dated page on its own site, and preferably both, across more than one signal type. The names are chosen when §5.3 is filled. They are not chosen in advance here.
 
 Order of implementation: confirm the SAM.gov production path, validate two organizations from real evidence, then run the signal-to-opportunity flow. Load IPEDS and add USAspending only after that first prototype works.
+
+---
+
+## 7. Sales Persona live lookups (added 2026-09-26)
+
+The Sales Persona (`AI_RAG_DESIGN.md` §23a) may fetch a small number of pages at answer time.
+It is a read for the user's current question, not a collection source: nothing fetched here becomes
+a signal, evidence row, or score.
+
+| Allowed host | Why |
+|---|---|
+| The official website of any tracked organization | Fresh look at the organization's own pages (§5) |
+| `honorlock.com`, `proctorio.com`, `meazurelearning.com`, `caveon.com`, `questionmark.com` | Competitor product and messaging changes named in the problem statement. Configured in `PERSONA_ALLOWED_DOMAINS` |
+
+Rules: the same `Fetcher` as scans (robots.txt, honest User-Agent, five-second per-host gap,
+same-domain redirects, gated pages refused); at most three pages per host and two per host when
+more than two hosts are read; excerpts are verbatim page text; a failure is reported to the user, never
+guessed. No search engine and no host outside this table. Adding a host is an edit to this table first.
+
+> NEEDS VERIFICATION — each competitor's terms of use and robots.txt. The fetcher already honors
+> robots.txt at request time; the terms have not been reviewed.
+
+---
+
+## 8. Google Programmable Search API (approved 2026-09-26)
+
+| | |
+|---|---|
+| Source name | Google Programmable Search (Custom Search JSON API) |
+| Official documentation | https://developers.google.com/custom-search/v1/overview |
+| Purpose | Find the peer competitors of one tracked organization when a user clicks Update (`API_CONTRACT.md` §6.6). Context only: not a signal source |
+| Access method | Official API with a key and a search engine id (`GOOGLE_SEARCH_API_KEY`, `GOOGLE_SEARCH_ENGINE_ID`). Never HTML scraping of google.com, which its robots.txt and terms disallow |
+| Approved by | The team lead, in the conversation of 2026-09-26. This is a third-party provider; it is used for this one purpose only |
+| Request | One `GET` per Update with the query `"<organization name>" peer competitors`, ten results at most |
+| Application cap | 20 requests per 24 hours (`GOOGLE_SEARCH_DAILY_REQUEST_CAP`), counted in `source_request_log` under `google_search`. An application safeguard, not Google's quota |
+| Evidence | The result's own `link`, `title`, and `snippet`. The model may only select competitor names that appear verbatim in a result title or snippet, and the stored snippet is that verbatim text |
+| Storage | `organization_peer_competitors` (`DATABASE_DESIGN.md` §5c). Replaced on each Update |
+| Failure behavior | Missing key, exhausted cap, or an API error returns a clear error and keeps the previous list. Nothing is invented |
+
+> NEEDS VERIFICATION — Google's free daily quota, whether a new key can be created for this API, and its
+> terms for storing result snippets. The application cap above stays until these are confirmed.
 
 ---
 

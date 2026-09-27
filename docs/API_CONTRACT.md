@@ -47,7 +47,9 @@ User-facing prose that the AI produced or that quotes a source includes `content
 
 ### 1.2 Enums
 
-**Organization type:** `university`, `college`, `k12_district`, `public_sector_education`
+**Organization type:** `university`, `college`, `k12_district`, `public_sector_education`, `edtech_company` (competitors only)
+
+**Market role:** `target`, `competitor`
 
 **Signal type:** `procurement`, `technology_initiative`, `leadership_change`, `funding_budget`, `strategic_announcement`, `competitor_vendor`, `contract_renewal`
 
@@ -428,6 +430,7 @@ When `advisor_status` is `unavailable`, the model did not return a usable answer
 | `q` | Optional. 0 to 200 characters. Matches organization name. Empty is the same as omitted. Fewer than 2 characters returns `data: []` and `total: 0` without an error, so the global search box can stay quiet |
 | `organization_type` | Optional. Repeatable. Each value must be an organization type |
 | `state_code` | Optional. Repeatable. Two-letter USPS code |
+| `market_role` | Optional. Repeatable. `target` or `competitor`. Omitted returns both |
 | `tracking_status` | Optional. Repeatable. `active` or `inactive` |
 | `has_opportunities` | Optional. `true` or `false` |
 | `sort` | `name` or `recently_scanned`. Default `name` |
@@ -596,6 +599,49 @@ Sets `status` to `rejected` so later scans do not collect the page. Does not del
 **Errors:** 400, 401, 403 `INSUFFICIENT_PERMISSION` for `SALES_REP`, 404, 409 on duplicate `website_url`.
 
 There is no DELETE organization endpoint. Managers deactivate tracking instead.
+
+### 6.6 Peer competitors (added 2026-09-26)
+
+The saved top 5 peer competitors of a `target` organization, and the Update that refreshes them
+from a web search (`DATA_SOURCES.md` §8).
+
+| | |
+|---|---|
+| Read | `GET /api/v1/organizations/{organization_id}/peer-competitors` |
+| Update | `POST /api/v1/organizations/{organization_id}/peer-competitors/refresh` |
+| Auth | Bearer |
+| Roles | Both |
+| Body | None |
+
+**200 (both)**
+
+```json
+{
+  "organization_id": "<uuid>",
+  "configured": true,
+  "last_updated_at": "<timestamp or null>",
+  "search_query": "<string or null>",
+  "data_origin": "live",
+  "peers": [
+    {
+      "rank": 1,
+      "name": "<as written in the result>",
+      "source_title": "<result title>",
+      "source_url": "https://...",
+      "snippet": "<verbatim result text that names it>",
+      "retrieved_at": "<timestamp>"
+    }
+  ]
+}
+```
+
+`peers` has 0 to 5 items, rank 1 first. `configured` is false when the server has no search key; the
+read still returns 200 with `peers: []`. Every field comes from the search result; the model only
+picks names that literally appear in it.
+
+**Errors:** 401, 403, 404 (organization), `SEARCH_NOT_CONFIGURED` (503), `SEARCH_RATE_LIMITED` (429, the
+application's daily search cap is used), `SEARCH_FAILED` (502, the previous list is kept). Refreshing a
+`competitor` organization returns 400.
 
 ---
 
@@ -865,6 +911,49 @@ Drill-down is not a second dashboard route. The client opens §8.1 or §7.1 with
 
 ---
 
+## 10a. Competitors (added 2026-09-26)
+
+Competitive intelligence from `COMPETITOR` organizations (`DATA_SOURCES.md` target data model).
+Competitor signals are never customer opportunities. No model is called here; every line is a stored,
+validated signal with its evidence (`AI_RAG_DESIGN.md` §26).
+
+| | |
+|---|---|
+| Method / path | `GET /api/v1/competitors` |
+| Auth | Bearer |
+| Roles | Both |
+| Query | None |
+
+**200**
+
+```json
+{
+  "generated_at": "<timestamp>",
+  "data_origin": "live",
+  "totals": { "competitors": 0, "validated_signals": 0, "new_in_window": 0, "window_days": 30 },
+  "competitors": [
+    {
+      "organization_id": "<uuid>",
+      "name": "Honorlock",
+      "website_url": "https://honorlock.com",
+      "tracking_status": "active",
+      "last_scanned_at": null,
+      "validated_signal_count": 0,
+      "signals": [
+        { "...": "SignalSummary (§5.3)", "evidence": [ "Evidence (§5.1), at most 2" ] }
+      ]
+    }
+  ]
+}
+```
+
+`signals` is at most 5 validated `competitor_vendor` signals per competitor, newest first. A competitor
+with none returns `signals: []` and the client says no competitor evidence was collected.
+
+**Errors:** 401, 403, 500.
+
+---
+
 ## 11. Evidence
 
 Evidence is embedded on signal detail, opportunity detail, dashboard insights, and Advisor answers so a card can render in one response.
@@ -957,6 +1046,65 @@ The Advisor does not create signals, opportunities, scans, or scores.
 
 There is no session list and no delete.
 
+### 12.3 Sales Persona (added 2026-09-26)
+
+| | |
+|---|---|
+| Method / path | `POST /api/v1/persona/messages` |
+| Auth | Bearer |
+| Roles | Both |
+
+**Request**
+
+```json
+{
+  "message": "Draft a first email to the assessment team at Purdue.",
+  "history": [{ "role": "user", "text": "..." }],
+  "organization_id": null,
+  "mode": "auto",
+  "scope": "general"
+}
+```
+
+`message` is 1 to 2000 characters. `history` is at most 12 turns; the server uses the last 6.
+`mode` is `auto`, `email`, `call_prep`, `competitor`, `daily_briefing`, or `research`.
+`scope` (default `auto`) is chosen by the user when the chat starts:
+
+| `scope` | Behaviour |
+|---|---|
+| `organization` | Requires `organization_id`. Uses only that organization's stored data, Advisor style. If nothing is stored for it, the answer is "Insufficient evidence" and no model is called. Names of other organizations in the message are ignored |
+| `general` | Outside and portfolio data (dashboard snapshot, competitors, allow-listed lookups). Never scoped to one organization, even if one is named |
+| `auto` | Older behaviour: `organization_id` or an organization named in the message scopes the answer |
+
+**200**
+
+```json
+{
+  "status": "answered",
+  "answer": {
+    "text": "<plain fallback>",
+    "blocks": [
+      { "type": "heading", "text": "..." },
+      { "type": "paragraph", "text": "...", "layer": "interpretation", "refs": [1] },
+      { "type": "bullets", "items": [{ "text": "...", "layer": "fact", "refs": [1, 2] }] },
+      { "type": "email", "subject": "...", "body": "..." }
+    ]
+  },
+  "sources": [
+    { "ref": 1, "label": "...", "url": "https://...", "kind": "live_lookup", "snippet": "..." }
+  ],
+  "follow_ups": ["..."],
+  "used": { "organizations": ["Purdue University"], "live_lookup": false },
+  "data_origin": "live"
+}
+```
+
+`status` is `answered` or `unavailable`. `layer` is `fact`, `interpretation`, or
+`recommended_action`. A `fact` always has at least one ref. `sources[].kind` is
+`stored_evidence`, `official_website`, `live_lookup`, or `system_data`. `email` is a draft only.
+
+**Errors:** 401, 403, 422 (validation), 500.
+
 ---
 
 ## 13. Search, filters, and sorting
@@ -1004,10 +1152,10 @@ The server never trusts a client-sent role, score, evidence URL, or organization
 | Create or edit signal or opportunity | Read-only intelligence. Changes come from scans |
 | Delete organization | Managers set `tracking_status` to `inactive` instead |
 | Unbounded open-web organization discovery (any domain) | Out of MVP |
-| CRM, email, or notification endpoints | Out of MVP |
+| CRM, email-sending, or notification endpoints | Out of MVP. Draft email text inside the Sales Persona answer (§12.3) is allowed; nothing is sent |
 | A free-form URL ingest endpoint for arbitrary pages or third-party sources | Collection is the scan pipeline and the source register in `DATA_SOURCES.md`. Managers may set only the organization's official `website_url` (§6.4–§6.5) and same-host official page URLs (§6.3a) |
 | Trusting LLM-proposed URLs without backend validation | Forbidden. MVP discovery proposes; validation stores |
-| Portfolio-wide Advisor with no scope | `AI_RAG_DESIGN.md` §23 |
+| Portfolio-wide Advisor with no scope | `AI_RAG_DESIGN.md` §23. The Sales Persona (§12.3) is a separate drafting and briefing surface with its own grounding rules in `AI_RAG_DESIGN.md` §23a |
 
 ---
 

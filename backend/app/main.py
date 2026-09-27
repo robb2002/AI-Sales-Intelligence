@@ -56,10 +56,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        from app.scheduler import create_scheduler
         from app.services.scans import mark_interrupted_on_startup
 
-        await mark_interrupted_on_startup(create_session_factory(engine))
+        session_factory = create_session_factory(engine)
+        await mark_interrupted_on_startup(session_factory)
+        scheduler = create_scheduler(settings, session_factory)
+        if scheduler is not None:
+            scheduler.start()
+            logger.info(
+                "Scheduler started",
+                extra={
+                    "fields": {
+                        "scan_all_utc": f"{settings.scheduler_scan_all_hour_utc:02d}:"
+                        f"{settings.scheduler_scan_all_minute:02d}"
+                    }
+                },
+            )
         yield
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
         await engine.dispose()
 
     is_local = settings.app_env == "local"

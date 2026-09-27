@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.repositories.base import Base
+from app.repositories.sources import Source
 
 
 class Evidence(Base):
@@ -141,3 +142,22 @@ async def count_for_signals(
         .group_by(Evidence.signal_id)
     )
     return {row[0]: int(row[1]) for row in rows.all()}
+
+
+async def first_for_signals(
+    session: AsyncSession, signal_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, tuple[Evidence, str | None]]:
+    """The earliest evidence row of each signal with its source name (None for a website page).
+    One query for many signals."""
+    if not signal_ids:
+        return {}
+    rows = await session.execute(
+        select(Evidence, Source.name)
+        .outerjoin(Source, Source.source_id == Evidence.source_id)
+        .where(Evidence.signal_id.in_(signal_ids))
+        .order_by(Evidence.created_at)
+    )
+    first: dict[uuid.UUID, tuple[Evidence, str | None]] = {}
+    for evidence, source_name in rows.all():
+        first.setdefault(evidence.signal_id, (evidence, source_name))
+    return first

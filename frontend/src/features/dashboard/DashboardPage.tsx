@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Circle, LoaderCircle, RefreshCw } from 'lucide-react'
+import { CheckCircle2, Circle, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
+import { getDashboard } from '../../api/dashboard'
 import {
   getScanBatch,
   listOrganizationSources,
@@ -10,15 +12,26 @@ import {
 } from '../../api/scans'
 import { isApiError } from '../../api/client'
 import { Alert } from '../../components/ui/Alert'
+import { AiPanel } from '../../components/intelligence/AiPanel'
+import { EvidenceList } from '../../components/intelligence/EvidenceList'
+import { OpportunityCard } from '../../components/intelligence/OpportunityCard'
+import { SignalCard } from '../../components/intelligence/SignalCard'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Card } from '../../components/ui/Card'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { Skeleton } from '../../components/ui/Skeleton'
-import type { OrganizationSourceItem, ScanBatchResponse, ScanSummary } from '../../types/api'
-import { ROLE_LABELS } from '../auth/roles'
+import { ErrorState } from '../../components/ui/ErrorState'
+import type {
+  DashboardInsight,
+  DashboardResponse,
+  OrganizationSourceItem,
+  ScanBatchResponse,
+  ScanSummary,
+} from '../../types/api'
 import { useCurrentUser } from '../auth/useCurrentUser'
-import { useIdentity } from '../auth/useIdentity'
+import { DashboardMetrics, DashboardMetricsSkeleton } from './DashboardMetrics'
+import { SignalVolumeChart } from './SignalVolumeChart'
 
 const DISCOVERY_STAGES = [
   { key: 'discovering', label: 'Discovering sources' },
@@ -45,11 +58,17 @@ function formatScanTime(value: string | null): string {
 
 export function DashboardPage() {
   const { data: user } = useCurrentUser()
-  const identity = useIdentity()
   const queryClient = useQueryClient()
   const [batch, setBatch] = useState<ScanBatchResponse | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+
+  const dashboardQuery = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: getDashboard,
+    staleTime: DASHBOARD_STALE_MS,
+    refetchInterval: (query) => (query.state.data?.scan_status.running ? 5000 : false),
+  })
 
   const orgsQuery = useQuery({
     queryKey: ['organizations', 'active'],
@@ -83,6 +102,7 @@ export function DashboardPage() {
       void queryClient.invalidateQueries({ queryKey: ['organization-sources'] })
       void queryClient.invalidateQueries({ queryKey: ['signals'] })
       void queryClient.invalidateQueries({ queryKey: ['opportunities'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     }
     wasRunning.current = batchRunning
   }, [batchRunning, queryClient])
@@ -137,24 +157,38 @@ export function DashboardPage() {
   const sourcesRefreshing = sourcesQuery.isFetching && Boolean(sourcesQuery.data)
 
   return (
-    <div className="space-y-6">
-      <Card className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-green-50">
-            <CheckCircle2 aria-hidden className="size-5 text-status-positive" strokeWidth={1.75} />
-          </span>
-          <div>
-            <h2 className="text-h3 text-primary">Access verified</h2>
-            <p className="mt-1 max-w-[68ch] text-body text-secondary">
-              Signed in as {identity.name}. The API verified your Clerk session and loaded your role
-              from the application database.
-            </p>
-          </div>
-        </div>
-        <Badge variant="outline-navy" className="self-start sm:self-center">
-          {ROLE_LABELS[user.role]}
-        </Badge>
-      </Card>
+    <div className="space-y-8">
+      {dashboardQuery.data?.data_origin === 'cached' && (
+        <Alert variant="cached" title="Showing cached data">
+          Some figures on this dashboard come from the cached fallback dataset because a public source
+          was temporarily unavailable. Affected items are labelled.
+        </Alert>
+      )}
+
+      {dashboardQuery.isPending && <DashboardMetricsSkeleton />}
+
+      {dashboardQuery.isError && (
+        <Card>
+          <ErrorState
+            title="Dashboard could not be loaded"
+            description={
+              isApiError(dashboardQuery.error)
+                ? dashboardQuery.error.message
+                : 'The dashboard request failed.'
+            }
+            reference={isApiError(dashboardQuery.error) ? dashboardQuery.error.requestId : null}
+            onRetry={() => void dashboardQuery.refetch()}
+            retrying={dashboardQuery.isFetching}
+          />
+        </Card>
+      )}
+
+      {dashboardQuery.data && <DashboardOverview data={dashboardQuery.data} />}
+
+      <section id="scanning" aria-labelledby="scanning-heading" className="scroll-mt-6 space-y-6">
+        <h2 id="scanning-heading" className="text-h2 text-primary">
+          Scanning
+        </h2>
 
       <Card className="relative space-y-4 overflow-hidden">
         {(orgsQuery.isFetching || latestScanQuery.isFetching) && !orgsPending && (
@@ -162,7 +196,7 @@ export function DashboardPage() {
         )}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-h3 text-primary">Source discovery</h2>
+            <h3 className="text-h3 text-primary">Source discovery</h3>
             <p className="mt-1 max-w-[68ch] text-body text-secondary">
               Scan Now runs for every active organization. It collects official pages and news,
               then refreshes signals and opportunities so you can review what changed.
@@ -212,7 +246,7 @@ export function DashboardPage() {
           <div className="absolute inset-x-0 top-0 h-0.5 bg-indigo-500" aria-hidden />
         )}
         <div>
-          <h2 className="text-h3 text-primary">Approved sources</h2>
+          <h3 className="text-h3 text-primary">Approved sources</h3>
           <p className="mt-1 text-body text-secondary">
             Validated official page URLs stored for active organizations.
           </p>
@@ -225,6 +259,7 @@ export function DashboardPage() {
             <OrganizationSourcesBlock
               key={organization.organization_id}
               name={organization.name}
+              isCompetitor={organization.market_role === 'competitor'}
               sources={sources}
             />
           ))}
@@ -243,7 +278,128 @@ export function DashboardPage() {
           <p className="text-body-sm text-muted">Approved sources appear after you activate organizations and scan.</p>
         )}
       </Card>
+      </section>
     </div>
+  )
+}
+
+function DashboardOverview({ data }: { data: DashboardResponse }) {
+  const empty =
+    data.opportunities.total === 0 &&
+    data.signals.validated_total === 0 &&
+    data.competitor_vendor.validated_total === 0 &&
+    data.prioritized_opportunities.length === 0 &&
+    data.recent_signals.length === 0
+
+  return (
+    <div className="space-y-8">
+      <DashboardMetrics data={data} empty={empty} />
+
+      {empty ? (
+        <Card>
+          <EmptyState
+            icon={RefreshCw}
+            title="No intelligence collected yet"
+            description="There are no validated signals or potential opportunities yet. Run Scan All in the Scanning section below to collect public information for your active organizations."
+            action={
+              <a
+                href="#scanning"
+                className="text-body font-medium text-navy-600 hover:underline focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden"
+              >
+                Go to Scanning
+              </a>
+            }
+          />
+        </Card>
+      ) : (
+        <div className="grid gap-8 xl:grid-cols-3">
+          <div className="space-y-8 xl:col-span-2">
+            <section aria-labelledby="prioritized-heading" className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <h2 id="prioritized-heading" className="text-h2 text-primary">
+                  Prioritized potential opportunities
+                </h2>
+                <Link
+                  to="/opportunities"
+                  className="text-body-sm font-medium text-navy-600 hover:underline focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden"
+                >
+                  View all
+                </Link>
+              </div>
+              {data.prioritized_opportunities.length === 0 ? (
+                <p className="text-body-sm text-secondary">
+                  No potential opportunities have been generated yet. They appear when related
+                  validated signals are connected for an organization.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {data.prioritized_opportunities.slice(0, 5).map((opportunity) => (
+                    <OpportunityCard key={opportunity.opportunity_id} opportunity={opportunity} />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section aria-labelledby="activity-heading" className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <h2 id="activity-heading" className="text-h2 text-primary">
+                  Signal activity
+                </h2>
+                <Link
+                  to="/signals"
+                  className="text-body-sm font-medium text-navy-600 hover:underline focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden"
+                >
+                  View all
+                </Link>
+              </div>
+              <SignalVolumeChart data={data.signal_volume} />
+              {data.recent_signals.length === 0 ? (
+                <p className="text-body-sm text-secondary">No validated signals to show yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {data.recent_signals.map((signal) => (
+                    <SignalCard key={signal.signal_id} signal={signal} />
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+
+          {data.ai_insights.length > 0 && (
+            <aside aria-label="AI insights" className="xl:col-span-1">
+              <AiInsights insights={data.ai_insights} />
+            </aside>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AiInsights({ insights }: { insights: DashboardInsight[] }) {
+  return (
+    <AiPanel label="interpretation" className="p-5!">
+      <div className="space-y-5">
+        {insights.map((insight, index) => (
+          <div key={index} className="space-y-3">
+            <p className="flex gap-2 text-body">
+              <Sparkles aria-hidden className="mt-0.5 size-4 shrink-0 text-indigo-400" strokeWidth={1.75} />
+              <span>{insight.text}</span>
+            </p>
+            {insight.evidence.length > 0 && (
+              <details className="rounded-lg bg-surface p-3 text-primary">
+                <summary className="cursor-pointer text-body-sm font-medium text-navy-600 focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden">
+                  View {insight.evidence.length} source{insight.evidence.length === 1 ? '' : 's'}
+                </summary>
+                <div className="mt-3">
+                  <EvidenceList items={insight.evidence} heading="SOURCES" />
+                </div>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+    </AiPanel>
   )
 }
 
@@ -377,9 +533,11 @@ function StageStepper({ scan }: { scan: ScanSummary }) {
 
 function OrganizationSourcesBlock({
   name,
+  isCompetitor = false,
   sources,
 }: {
   name: string
+  isCompetitor?: boolean
   sources: OrganizationSourceItem[]
 }) {
   const getExtractionBadge = (status: string) => {
@@ -402,7 +560,10 @@ function OrganizationSourcesBlock({
   return (
     <div className="space-y-3 border-t border-default pt-4 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h3 className="text-body font-medium text-primary">{name}</h3>
+        <h3 className="flex flex-wrap items-center gap-2 text-body font-medium text-primary">
+          {name}
+          {isCompetitor && <Badge variant="soft-neutral">Competitor</Badge>}
+        </h3>
       </div>
 
       {sources.length === 0 ? (

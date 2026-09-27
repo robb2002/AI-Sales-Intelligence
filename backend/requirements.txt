@@ -9,3 +9,4 @@ httpx==0.28.1
 beautifulsoup4==4.12.3
 # Optional: preferred text splitter when installable (fallback in app.ingestion.chunking).
 # langchain-text-splitters==0.3.9
+apscheduler==3.11.3

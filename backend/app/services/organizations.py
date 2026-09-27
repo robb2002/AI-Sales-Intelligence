@@ -32,6 +32,7 @@ async def list_organizations(
     q: str | None = None,
     organization_types: list[str] | None = None,
     state_codes: list[str] | None = None,
+    market_roles: list[str] | None = None,
     tracking_statuses: list[str] | None = None,
     sort: str = "name",
     direction: str = "asc",
@@ -48,6 +49,8 @@ async def list_organizations(
         filters.append(Organization.organization_type.in_(organization_types))
     if state_codes:
         filters.append(Organization.state_code.in_([code.upper() for code in state_codes]))
+    if market_roles:
+        filters.append(Organization.market_role.in_(market_roles))
     if tracking_statuses:
         filters.append(Organization.tracking_status.in_(tracking_statuses))
 

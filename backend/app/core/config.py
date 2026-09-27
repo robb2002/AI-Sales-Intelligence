@@ -43,7 +43,29 @@ class Settings(BaseSettings):
     sam_gov_api_key: str = ""
     sam_gov_search_url: str = "https://api.sam.gov/opportunities/v2/search"
     sam_gov_daily_request_cap: int = 10
-    sam_gov_search_limit: int = 25
+    # One shared request per scan. GSA documents `limit` up to 1000; a larger page lets one
+    # request cover far more notices for local organization matching (DATA_SOURCES §2.1).
+    sam_gov_search_limit: int = 1000
+
+    # Google Programmable Search (DATA_SOURCES.md §8). Peer competitors on Update. The cap is an
+    # application safeguard, not Google's quota.
+    google_search_api_key: str = ""
+    google_search_engine_id: str = ""
+    google_search_url: str = "https://www.googleapis.com/customsearch/v1"
+    google_search_daily_request_cap: int = 20
+
+    # Sales Persona live lookups. Only these official domains (plus the official website of a
+    # tracked organization) may be fetched, through the same robots-respecting fetcher as scans.
+    persona_live_lookup_enabled: bool = True
+    persona_allowed_domains: str = (
+        "honorlock.com,proctorio.com,meazurelearning.com,caveon.com,questionmark.com"
+    )
+    persona_max_live_pages_per_domain: int = 3
+
+    # APScheduler daily Scan All (TECHNICAL_PRD). Off unless explicitly enabled.
+    scheduler_enabled: bool = False
+    scheduler_scan_all_hour_utc: int = 6
+    scheduler_scan_all_minute: int = 0
 
     @field_validator("database_url")
     @classmethod
@@ -60,6 +82,18 @@ class Settings(BaseSettings):
             for origin in self.cors_allowed_origins.split(",")
             if origin.strip()
         ]
+
+    @property
+    def persona_domains(self) -> list[str]:
+        return [
+            domain.strip().lower().removeprefix("www.")
+            for domain in self.persona_allowed_domains.split(",")
+            if domain.strip()
+        ]
+
+    @property
+    def google_search_configured(self) -> bool:
+        return bool(self.google_search_api_key.strip() and self.google_search_engine_id.strip())
 
     @property
     def llm_configured(self) -> bool:
