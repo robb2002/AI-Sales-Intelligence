@@ -10,6 +10,7 @@ request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 # Redact secrets that may appear in httpx URLs or accidental log fields.
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(api_key=)([^&\s\"']+)", re.IGNORECASE), r"\1***"),
+    (re.compile(r"([?&]key=)([^&\s\"']+)", re.IGNORECASE), r"\1***"),  # Google Programmable Search
     (re.compile(r"(api-key[\"']?\s*[:=]\s*[\"']?)([^\"'\s,]+)", re.IGNORECASE), r"\1***"),
     (re.compile(r"(Bearer\s+)([A-Za-z0-9\-._~+/]+=*)", re.IGNORECASE), r"\1***"),
     (re.compile(r"(sk_(?:live|test)_)([A-Za-z0-9]+)", re.IGNORECASE), r"\1***"),

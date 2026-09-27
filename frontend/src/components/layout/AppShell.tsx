@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router'
 import { useDocumentTitle } from '../../lib/useDocumentTitle'
 import type { CurrentUser } from '../../types/api'
+import { SalesPersonaWidget } from '../persona/SalesPersonaWidget'
 import { Header } from './Header'
 import { Sidebar } from './Sidebar'
 
@@ -9,6 +10,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/organizations': 'Organizations',
   '/signals': 'Signals',
   '/opportunities': 'Potential Opportunities',
+  '/competitors': 'Competitors',
   '/advisor': 'AI Sales Advisor',
 }
 
@@ -40,6 +42,7 @@ export function AppShell({ user }: { user: CurrentUser }) {
           <Outlet />
         </main>
       </div>
+      <SalesPersonaWidget />
     </div>
   )
 }

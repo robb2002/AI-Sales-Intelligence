@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router'
 import { LoginPage } from '../features/auth/LoginPage'
 import { AdvisorPage } from '../features/advisor/AdvisorPage'
+import { CompetitorsPage } from '../features/competitors/CompetitorsPage'
 import { DashboardPage } from '../features/dashboard/DashboardPage'
 import { OrganizationDetailPage } from '../features/organizations/OrganizationDetailPage'
 import { OrganizationsPage } from '../features/organizations/OrganizationsPage'
@@ -23,6 +24,7 @@ export function AppRoutes() {
         <Route path="signals/:signalId" element={<SignalDetailPage />} />
         <Route path="opportunities" element={<OpportunitiesPage />} />
         <Route path="opportunities/:opportunityId" element={<OpportunityDetailPage />} />
+        <Route path="competitors" element={<CompetitorsPage />} />
         <Route path="advisor" element={<AdvisorPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

@@ -16,7 +16,9 @@ const sideClasses = {
 
 export function Tooltip({ content, children, side = 'right', className, wrapperClassName }: TooltipProps) {
   return (
-    <span className={cn('group/tooltip relative inline-flex', wrapperClassName)}>
+    // `cn` does not resolve conflicting utilities, so a caller-supplied wrapper class replaces the
+    // default `inline-flex` instead of sitting beside it (both would leave `inline-flex` winning).
+    <span className={cn('group/tooltip relative', wrapperClassName ?? 'inline-flex')}>
       {children}
       <span
         role="tooltip"

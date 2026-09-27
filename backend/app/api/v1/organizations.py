@@ -8,7 +8,7 @@ from app.api.deps import get_session, require_roles
 from app.core.errors import ValidationAppError
 from app.core.security import CurrentUser
 from app.repositories import documents as documents_repo
-from app.repositories.organizations import ORGANIZATION_TYPES, TRACKING_STATUSES
+from app.repositories.organizations import MARKET_ROLES, ORGANIZATION_TYPES, TRACKING_STATUSES
 from app.schemas.organizations import (
     OrganizationCreate,
     OrganizationResponse,
@@ -32,6 +32,7 @@ async def list_organizations(
     q: Annotated[str | None, Query(max_length=200)] = None,
     organization_type: Annotated[list[str] | None, Query()] = None,
     state_code: Annotated[list[str] | None, Query()] = None,
+    market_role: Annotated[list[str] | None, Query()] = None,
     tracking_status: Annotated[list[str] | None, Query()] = None,
     sort: Annotated[str, Query()] = "name",
     direction: Annotated[str | None, Query()] = None,
@@ -40,6 +41,8 @@ async def list_organizations(
 ) -> dict:
     if organization_type and any(value not in ORGANIZATION_TYPES for value in organization_type):
         raise ValidationAppError(details={"organization_type": "invalid"})
+    if market_role and any(value not in MARKET_ROLES for value in market_role):
+        raise ValidationAppError(details={"market_role": "invalid"})
     if tracking_status and any(value not in TRACKING_STATUSES for value in tracking_status):
         raise ValidationAppError(details={"tracking_status": "invalid"})
     if sort not in ("name", "recently_scanned"):
@@ -54,6 +57,7 @@ async def list_organizations(
         q=q,
         organization_types=organization_type,
         state_codes=state_code,
+        market_roles=market_role,
         tracking_statuses=tracking_status,
         sort=sort,
         direction=direction,

@@ -508,6 +508,27 @@ The Advisor cannot create a scan, a signal, or a score.
 
 ---
 
+## 23a. Sales Persona (added 2026-09-26, approved by the team lead)
+
+A second conversational surface beside the scoped Advisor: a floating chat on every page for the
+rep's daily work. It is not a portfolio-wide Advisor that invents answers; it is a copilot that
+drafts and briefs from the same stored evidence.
+
+| Item | Rule |
+|---|---|
+| Jobs | Daily briefing, account research, call prep, competitor update, email draft |
+| Facts | Only from stored validated signals, stored scores, retrieved chunks, the dashboard snapshot, and allow-listed live lookups. Same grounding rule as §21: an uncited fact is dropped |
+| General sales craft | Question structure, email shape, objection handling may come from the model. It is labelled `interpretation` or `recommended_action`, never `fact` |
+| Live lookups | Only the domains in `DATA_SOURCES.md` §7 and the official website of a tracked organization, through the scan `Fetcher`. No open-web search, no third-party search provider |
+| Emails | Draft text the rep copies. Nothing is sent. Unknown recipient details use placeholders. No claim about an RFP, budget, or decision the sources do not state |
+| Excelsoft claims | The model may not state Excelsoft products, features, customers, or results. It uses a placeholder for the rep to confirm |
+| Output | Structured blocks (heading, paragraph, bullets, email) with numbered source refs. No ids are shown to the user |
+| Scope choice | The chat starts by asking whether the question is about a tracked organization or about general/outside data. An organization is picked from a suggestion list and the chat then works the Advisor way (only that organization's data, insufficient evidence when there is none). Otherwise it is the general workflow. `API_CONTRACT.md` §12.3 `scope` |
+| State | Stateless on the server. The client sends the last six turns |
+| Not changed | Scan, signal, correlation, and scoring pipelines. The persona only reads their output |
+
+---
+
 ## 24. Organization briefing
 
 Produced at the end of a scan for that organization, from validated signals and their snippets. Not from open retrieval, so a briefing cannot cite a page that did not produce a checked snippet.

@@ -16,6 +16,7 @@ const ORG_TYPES = [
   { value: 'college', label: 'College' },
   { value: 'k12_district', label: 'K-12 district' },
   { value: 'public_sector_education', label: 'Public-sector education' },
+  { value: 'edtech_company', label: 'EdTech company' },
 ] as const
 
 const MARKET_ROLES = [

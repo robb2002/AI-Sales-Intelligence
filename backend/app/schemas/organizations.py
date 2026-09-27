@@ -4,7 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-OrganizationType = Literal["university", "college", "k12_district", "public_sector_education"]
+OrganizationType = Literal[
+    "university", "college", "k12_district", "public_sector_education", "edtech_company"
+]
 MarketRole = Literal["target", "competitor"]
 TrackingStatus = Literal["active", "inactive"]
 PageCategory = Literal[

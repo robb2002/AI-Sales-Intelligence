@@ -40,6 +40,7 @@ async def start_scan_all(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     requested_by_user_id: uuid.UUID | None = None,
+    trigger: str = "manual",
 ) -> tuple[ScanBatch, list[ScanRun], list[uuid.UUID]]:
     orgs = await list_active_organizations(session)
     if not orgs:
@@ -62,7 +63,7 @@ async def start_scan_all(
         run = ScanRun(
             batch_id=batch.batch_id,
             organization_id=org.organization_id,
-            trigger="manual",
+            trigger=trigger,
             requested_by_user_id=requested_by_user_id,
             status="queued",
             stage="discovering",
@@ -230,7 +231,8 @@ async def _run_batch(
         sam_collection.fetch_sam_for_batch(
             session_factory,
             settings=settings,
-            organizations=list(orgs_by_id.values()),
+            # SAM.gov quota is reserved for TARGET organizations (DATA_SOURCES target data model).
+            organizations=[o for o in orgs_by_id.values() if o.market_role == "target"],
         )
     )
 
@@ -373,9 +375,11 @@ async def _run_organization(
                 await session.commit()
 
             try:
-                await correlate_organization_opportunity(
-                    session, llm=llm, scan=scan, org=org
-                )
+                # A COMPETITOR is competitive intelligence, never a customer opportunity.
+                if org.market_role == "target":
+                    await correlate_organization_opportunity(
+                        session, llm=llm, scan=scan, org=org
+                    )
                 await session.commit()
             except Exception:
                 logger.exception("Opportunity correlation failed")

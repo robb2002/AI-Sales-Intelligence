@@ -1,7 +1,19 @@
 from fastapi import APIRouter, Depends
 
 from app.api.deps import require_app_user
-from app.api.v1 import advisor, health, me, opportunities, organizations, scans, signals
+from app.api.v1 import (
+    advisor,
+    competitors,
+    dashboard,
+    health,
+    me,
+    opportunities,
+    organizations,
+    peer_competitors,
+    persona,
+    scans,
+    signals,
+)
 
 public_router = APIRouter(prefix="/api/v1")
 public_router.include_router(health.router)
@@ -14,3 +26,7 @@ protected_router.include_router(scans.router)
 protected_router.include_router(signals.router)
 protected_router.include_router(opportunities.router)
 protected_router.include_router(advisor.router)
+protected_router.include_router(dashboard.router)
+protected_router.include_router(competitors.router)
+protected_router.include_router(peer_competitors.router)
+protected_router.include_router(persona.router)

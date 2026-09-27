@@ -45,11 +45,20 @@ export type ScoreBand = 'high' | 'medium' | 'low' | 'monitor'
 
 export type DataOrigin = 'live' | 'cached'
 
+export type OrganizationType =
+  | 'university'
+  | 'college'
+  | 'k12_district'
+  | 'public_sector_education'
+  | 'edtech_company'
+
+export type MarketRole = 'target' | 'competitor'
+
 export interface OrganizationSummary {
   organization_id: string
   name: string
-  organization_type: string
-  market_role: string
+  organization_type: OrganizationType | string
+  market_role: MarketRole | string
   tracking_status: 'active' | 'inactive' | string
   state_code: string | null
   website_url: string | null
@@ -317,6 +326,9 @@ export type ApiErrorCode =
   | 'CONFLICT'
   | 'SCAN_RATE_LIMITED'
   | 'ADVISOR_RATE_LIMITED'
+  | 'SEARCH_NOT_CONFIGURED'
+  | 'SEARCH_RATE_LIMITED'
+  | 'SEARCH_FAILED'
   | 'INTERNAL_ERROR'
 
 export interface ErrorEnvelope {
@@ -325,4 +337,146 @@ export interface ErrorEnvelope {
     message: string
     details: Record<string, unknown>
   }
+}
+
+export type DashboardScanState = 'never_scanned' | 'current' | 'running' | 'partial' | 'failed'
+
+export interface DashboardInsight {
+  text: string
+  content_layer: 'interpretation'
+  evidence_ids: string[]
+  evidence: EvidenceItem[]
+}
+
+export interface DashboardResponse {
+  generated_at: string
+  data_origin: DataOrigin
+  opportunities: {
+    total: number
+    by_band: Record<ScoreBand, number>
+    new_since: string
+    new_count: number
+  }
+  signals: {
+    validated_total: number
+    by_type: Record<SignalType, number>
+    recent_window_days: number
+    recent_count: number
+  }
+  competitor_vendor: {
+    validated_total: number
+    new_in_window: number
+  }
+  scan_status: {
+    state: DashboardScanState
+    last_finished_at: string | null
+    running: boolean
+    last_status: ScanStatus | null
+    sources_failed: number
+  }
+  prioritized_opportunities: OpportunitySummary[]
+  recent_signals: SignalSummary[]
+  signal_volume: Array<{ date: string; count: number }>
+  ai_insights: DashboardInsight[]
+}
+
+export type PersonaMode =
+  | 'auto'
+  | 'email'
+  | 'call_prep'
+  | 'competitor'
+  | 'daily_briefing'
+  | 'research'
+
+export type PersonaLayer = 'fact' | 'interpretation' | 'recommended_action'
+
+export interface PersonaHistoryTurn {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+export type PersonaScopeKind = 'auto' | 'organization' | 'general'
+
+export interface PersonaRequest {
+  message: string
+  history: PersonaHistoryTurn[]
+  organization_id: string | null
+  mode: PersonaMode
+  scope?: PersonaScopeKind
+}
+
+export type PersonaBlock =
+  | { type: 'heading'; text: string }
+  | { type: 'paragraph'; text: string; layer?: string; refs?: number[] }
+  | {
+      type: 'bullets'
+      items: Array<{ text: string; layer?: PersonaLayer; refs?: number[] }>
+    }
+  | { type: 'email'; subject: string; body: string }
+
+export type PersonaSourceKind =
+  | 'stored_evidence'
+  | 'official_website'
+  | 'live_lookup'
+  | 'system_data'
+
+export interface PersonaSource {
+  ref: number
+  label: string
+  url: string | null
+  kind: PersonaSourceKind
+  snippet: string | null
+}
+
+export interface PersonaResponse {
+  status: 'answered' | 'unavailable'
+  answer: { text: string; blocks: PersonaBlock[] }
+  sources: PersonaSource[]
+  follow_ups: string[]
+  used: { organizations: string[]; live_lookup: boolean }
+  data_origin: DataOrigin
+}
+
+export interface CompetitorSignal extends SignalSummary {
+  evidence: EvidenceItem[]
+}
+
+export interface CompetitorItem {
+  organization_id: string
+  name: string
+  website_url: string | null
+  tracking_status: 'active' | 'inactive' | string
+  last_scanned_at: string | null
+  validated_signal_count: number
+  signals: CompetitorSignal[]
+}
+
+export interface CompetitorsResponse {
+  generated_at: string
+  data_origin: DataOrigin
+  totals: {
+    competitors: number
+    validated_signals: number
+    new_in_window: number
+    window_days: number
+  }
+  competitors: CompetitorItem[]
+}
+
+export interface PeerCompetitor {
+  rank: number
+  name: string
+  source_title: string | null
+  source_url: string
+  snippet: string
+  retrieved_at: string
+}
+
+export interface PeerCompetitorsResponse {
+  organization_id: string
+  configured: boolean
+  last_updated_at: string | null
+  search_query: string | null
+  data_origin: 'live' | 'cached'
+  peers: PeerCompetitor[]
 }

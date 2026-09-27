@@ -77,6 +77,24 @@ class ConflictError(AppError):
         super().__init__(message or self.message, {"field": field})
 
 
+class SearchNotConfiguredError(AppError):
+    status_code = 503
+    code = "SEARCH_NOT_CONFIGURED"
+    message = "Web search is not configured on the server yet."
+
+
+class SearchRateLimitedError(AppError):
+    status_code = 429
+    code = "SEARCH_RATE_LIMITED"
+    message = "The daily web search limit has been reached. Try again tomorrow."
+
+
+class SearchFailedError(AppError):
+    status_code = 502
+    code = "SEARCH_FAILED"
+    message = "The web search could not be completed. The previous list is unchanged."
+
+
 def error_body(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 

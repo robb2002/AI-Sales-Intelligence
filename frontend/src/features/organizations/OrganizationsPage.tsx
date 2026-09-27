@@ -13,16 +13,12 @@ import { ErrorState } from '../../components/ui/ErrorState'
 import { Input, Select } from '../../components/ui/Input'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { TrackingToggle } from '../../components/ui/TrackingToggle'
+import { ORG_TYPE_LABELS } from '../intelligence/labels'
 import { useDocumentTitle } from '../../lib/useDocumentTitle'
 import { useCurrentUser } from '../auth/useCurrentUser'
 import { OrganizationFormModal } from './OrganizationFormModal'
 
-const TYPE_LABELS: Record<string, string> = {
-  university: 'University',
-  college: 'College',
-  k12_district: 'K-12 district',
-  public_sector_education: 'Public-sector education',
-}
+const TYPE_LABELS = ORG_TYPE_LABELS
 
 function formatScanTime(value: string | null): string {
   if (!value) return 'Never scanned'
@@ -45,12 +41,13 @@ export function OrganizationsPage() {
   const [formOpen, setFormOpen] = useState(false)
 
   const query = useQuery({
-    queryKey: ['organizations', 'list', q, organizationType, trackingStatus],
+    queryKey: ['organizations', 'list', 'target', q, organizationType, trackingStatus],
     queryFn: () =>
       listOrganizations({
         q: q.trim().length >= 2 ? q.trim() : undefined,
         organization_type: organizationType ? [organizationType] : undefined,
         tracking_status: trackingStatus ? [trackingStatus] : undefined,
+        marketRole: ['target'],
         sort: 'name',
         limit: 100,
       }),
