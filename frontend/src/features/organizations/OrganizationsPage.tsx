@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, ExternalLink, Plus, Search, Trash2 } from 'lucide-react'
+import { Building2, Clock, ExternalLink, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
 import { listOrganizations, updateOrganization } from '../../api/organizations'
+import { getScanAllSchedule } from '../../api/scanAllTrigger'
 import { Alert } from '../../components/ui/Alert'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
@@ -18,6 +19,7 @@ import { useDocumentTitle } from '../../lib/useDocumentTitle'
 import { useCurrentUser } from '../auth/useCurrentUser'
 import { DeleteOrganizationModal } from './DeleteOrganizationModal'
 import { OrganizationFormModal } from './OrganizationFormModal'
+import { ScanAllSchedulerModal } from './ScanAllSchedulerModal'
 
 const TYPE_LABELS = ORG_TYPE_LABELS
 
@@ -40,11 +42,20 @@ export function OrganizationsPage() {
   const organizationType = params.get('organization_type') ?? ''
   const trackingStatus = params.get('tracking_status') ?? ''
   const [formOpen, setFormOpen] = useState(false)
+  const [schedulerOpen, setSchedulerOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{
     organization_id: string
     name: string
     market_role: string
   } | null>(null)
+
+  const scanAllScheduleQuery = useQuery({
+    queryKey: ['scan-all-schedule'],
+    queryFn: getScanAllSchedule,
+    // Both roles see the message; only a manager can set/clear it (server-enforced on PATCH).
+    // Poll while a schedule is armed so it self-clears in the UI once it fires, no reload needed.
+    refetchInterval: (q) => (q.state.data?.scheduled_at ? 15000 : false),
+  })
 
   const query = useQuery({
     queryKey: ['organizations', 'list', 'target', q, organizationType, trackingStatus],
@@ -118,12 +129,28 @@ export function OrganizationsPage() {
           <p className="mt-1 text-body-sm text-secondary">
             Tracked US education organizations. Both roles can view; managers add, activate, and delete.
           </p>
+          {scanAllScheduleQuery.data?.scheduled_at && (
+            <p className="mt-1 text-body-sm font-medium text-indigo-600">
+              Scan All scheduled for{' '}
+              {new Date(scanAllScheduleQuery.data.scheduled_at).toLocaleString(undefined, {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })}
+            </p>
+          )}
         </div>
-        {isManager && (
-          <Button variant="primary" icon={Plus} onClick={() => setFormOpen(true)}>
-            Add organization
-          </Button>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {isManager && (
+            <Button variant="secondary" icon={Clock} onClick={() => setSchedulerOpen(true)}>
+              Scheduler
+            </Button>
+          )}
+          {isManager && (
+            <Button variant="primary" icon={Plus} onClick={() => setFormOpen(true)}>
+              Add organization
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -332,10 +359,19 @@ export function OrganizationsPage() {
       <OrganizationFormModal
         mode="create"
         open={formOpen}
+        isManager={isManager}
         onClose={() => setFormOpen(false)}
         onSaved={(id) => {
           void queryClient.invalidateQueries({ queryKey: ['organizations'] })
           void navigate(`/organizations/${id}`)
+        }}
+      />
+      <ScanAllSchedulerModal
+        open={schedulerOpen}
+        currentScheduledAt={scanAllScheduleQuery.data?.scheduled_at ?? null}
+        onClose={() => setSchedulerOpen(false)}
+        onSaved={(scheduledAt) => {
+          queryClient.setQueryData(['scan-all-schedule'], { scheduled_at: scheduledAt })
         }}
       />
       {deleteTarget && (

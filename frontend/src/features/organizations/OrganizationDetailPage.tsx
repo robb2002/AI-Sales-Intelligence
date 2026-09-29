@@ -22,7 +22,7 @@ import { FieldLabel, Input, Select } from '../../components/ui/Input'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { TrackingToggle } from '../../components/ui/TrackingToggle'
 import { useDocumentTitle } from '../../lib/useDocumentTitle'
-import type { ScanDetail } from '../../types/api'
+import type { OrganizationDetail, ScanDetail } from '../../types/api'
 import { useCurrentUser } from '../auth/useCurrentUser'
 import { DeleteOrganizationModal } from './DeleteOrganizationModal'
 import { OrganizationFormModal } from './OrganizationFormModal'
@@ -79,6 +79,19 @@ export function OrganizationDetailPage() {
     queryKey: ['organizations', organizationId],
     queryFn: () => getOrganization(organizationId),
     enabled: Boolean(organizationId),
+    // Keep this page live without a manual reload for two cases the UI can't otherwise learn
+    // about on its own: (a) a manager's scheduled trigger is armed and waiting to fire, and
+    // (b) a scan — started by that trigger, by another tab, or by Scan All — is in flight for
+    // this organization. 15s while only watching a future trigger; 5s (matching the existing
+    // manual Scan Now poll elsewhere on this page) once a scan is actually running.
+    refetchInterval: (query) => {
+      const data = query.state.data as OrganizationDetail | undefined
+      if (!data) return false
+      const scanStatus = data.last_scan?.status
+      if (scanStatus === 'queued' || scanStatus === 'running') return 5000
+      if (data.scheduled_scan_at) return 15000
+      return false
+    },
   })
 
   const sourcesQuery = useQuery({
@@ -256,6 +269,15 @@ export function OrganizationDetailPage() {
                 </>
               ) : null}
             </p>
+            {org.scheduled_scan_at && (
+              <p className="text-caption font-medium text-indigo-600">
+                Next scheduled scan{' '}
+                {new Date(org.scheduled_scan_at).toLocaleString(undefined, {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+              </p>
+            )}
             <p className="text-caption text-muted">
               {org.last_scanned_at
                 ? `Last scanned ${new Date(org.last_scanned_at).toLocaleString(undefined, {
@@ -612,6 +634,7 @@ export function OrganizationDetailPage() {
         mode="edit"
         initial={org}
         open={editOpen}
+        isManager={isManager}
         onClose={() => setEditOpen(false)}
         onSaved={() => {
           void queryClient.invalidateQueries({ queryKey: ['organizations'] })

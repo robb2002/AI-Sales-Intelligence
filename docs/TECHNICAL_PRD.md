@@ -510,8 +510,21 @@ lose the evidence, and every downstream claim can be traced to bytes actually re
 **Owner:** Developer 3.
 
 **AD-03.** APScheduler runs in-process, started and stopped by the FastAPI lifespan handler. Jobs
-are declared in code and configured by settings, so no job store is required; there are no
-user-created schedules to persist.
+are declared in code and configured by settings, so no job store is required for the daily Scan
+All job.
+
+**Scheduled scan check (added 2026-09-29).** Two exceptions to "no user-created schedules", both
+always-on APScheduler jobs in `app/scheduled_scan_trigger.py`, each polling every 60 seconds,
+independent of `SCHEDULER_ENABLED` (the daily Scan All toggle above) and not changing AD-03's
+in-process, single-worker constraint:
+
+- A manager may set a single future UTC date/time per organization
+  (`organizations.scheduled_scan_at`, `API_CONTRACT.md` §6.5); the job starts that organization's
+  scan once due and clears the column.
+- A manager may set one future UTC date/time for Scan All (`scan_all_trigger`, a singleton row,
+  `API_CONTRACT.md` §9.2a); the job starts Scan All once due and clears the row.
+
+A database row stands in for a job store in both cases, so nothing is lost on restart.
 
 **The single-worker constraint.** Because the scheduler is in-process, the backend must run as
 **one worker process**. Two workers would mean two schedulers and duplicated scans. This is

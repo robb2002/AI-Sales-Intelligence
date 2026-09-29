@@ -98,6 +98,7 @@ async def start_scan_for_organization(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     requested_by_user_id: uuid.UUID | None = None,
+    trigger: str = "manual",
 ) -> tuple[ScanRun, Organization, bool]:
     org = await session.get(Organization, organization_id)
     if org is None:
@@ -116,7 +117,7 @@ async def start_scan_for_organization(
     run = ScanRun(
         batch_id=None,
         organization_id=organization_id,
-        trigger="manual",
+        trigger=trigger,
         requested_by_user_id=requested_by_user_id,
         status="queued",
         stage="discovering",

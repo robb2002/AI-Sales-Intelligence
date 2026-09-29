@@ -7,6 +7,7 @@ signals, scores and chunks, and (optionally) fetches allow-listed official pages
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ _RAG_MIN_SIMILARITY = 0.78
 _RAG_KEYWORD_BONUS = 0.05
 _CONTEXT_CHUNK_CHARS = 350
 _MAX_CONTEXT_CHARS = 10_000
+_LIVE_LOOKUP_TIMEOUT_SECONDS = 8.0
 _MAX_BLOCKS = 8
 _MAX_ITEMS = 12
 _MAX_TABLE_COLS = 6
@@ -152,13 +154,21 @@ async def reply(
     if scope == "organization" and not ctx.sources:
         # Advisor rule: nothing stored about this organization means no answer and no model call.
         return _insufficient(ctx, focus[0])
+
+    live_lookup_task = asyncio.ensure_future(
+        _add_live_lookups(settings, ctx, organizations, focus, message, mode, scoped=scoped)
+    )
     if not scoped:
+        # The stored-data steps below share `session`, which SQLAlchemy's AsyncSession does not
+        # allow using concurrently, so they stay sequential relative to each other. But neither
+        # touches HTTP, so both run alongside the live lookup above (the slowest single step —
+        # up to _LIVE_LOOKUP_TIMEOUT_SECONDS — instead of stacking after it) rather than adding
+        # their own few seconds on top of it.
         if mode in ("daily_briefing", "auto", "research", "email"):
             await _add_portfolio_snapshot(session, ctx)
         if mode == "competitor" or _COMPETITOR_WORDS.search(message):
             await _add_competitor_digest(session, ctx)
-
-    await _add_live_lookups(settings, ctx, organizations, focus, message, mode, scoped=scoped)
+    await live_lookup_task
 
     if not (settings.persona_gemini_configured or settings.llm_configured):
         return _unavailable(ctx)
@@ -454,14 +464,30 @@ async def _add_live_lookups(
     if not domains:
         return
 
-    # One page per domain when answering quickly from chat; still allowlisted.
-    results = await persona_lookup.lookup_domains(
-        settings,
-        domains=domains,
-        allowed=allowed,
-        query=message,
-        max_pages_override=1 if scoped else None,
-    )
+    # Page count is the dominant Persona-latency cost: a fresh robots.txt fetch per host, plus
+    # a mandatory 5s politeness gap (DATA_SOURCES.md §5.4) before any second page on that same
+    # host. One page per domain keeps this a live, in-chat wait (rep is watching a spinner) at
+    # roughly the cost of one page load instead of one page load plus a 5s+ stall for a second.
+    try:
+        results = await asyncio.wait_for(
+            persona_lookup.lookup_domains(
+                settings,
+                domains=domains,
+                allowed=allowed,
+                query=message,
+                max_pages_override=1,
+            ),
+            timeout=_LIVE_LOOKUP_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        # asyncio.TimeoutError and builtin TimeoutError are the same class from Python 3.11, but
+        # this must still catch the pre-3.11 asyncio-specific one explicitly.
+        logger.warning("Persona live lookup timed out after %ss", _LIVE_LOOKUP_TIMEOUT_SECONDS)
+        ctx.lines.append(
+            "LIVE LOOKUP COULD NOT READ: timed out before any page loaded. Answer from stored "
+            "data only and say live web results were not available in time."
+        )
+        return
     failures: list[str] = []
     for result in results:
         failures += result.failures

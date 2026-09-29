@@ -168,6 +168,8 @@ async def update_organization(
         org.tracking_status = payload["tracking_status"]
     if "state_code" in payload:
         org.state_code = payload["state_code"]
+    if "scheduled_scan_at" in payload:
+        org.scheduled_scan_at = payload["scheduled_scan_at"]
 
     if "website_url" in payload and payload["website_url"] is not None:
         if payload["website_url"] != org.website_url:
@@ -318,4 +320,5 @@ async def _to_response(
         data_origin="live",
         ipeds=ipeds,
         last_scan=last_scan,
+        scheduled_scan_at=org.scheduled_scan_at,
     )

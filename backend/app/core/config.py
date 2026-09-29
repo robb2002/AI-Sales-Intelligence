@@ -66,7 +66,9 @@ class Settings(BaseSettings):
     persona_allowed_domains: str = (
         "honorlock.com,proctorio.com,meazurelearning.com,caveon.com,questionmark.com"
     )
-    persona_max_live_pages_per_domain: int = 3
+    # Ceiling only; app/services/persona.py always passes an explicit, lower override per call
+    # (each extra page on one host costs the mandatory 5s politeness gap — DATA_SOURCES.md §5.4).
+    persona_max_live_pages_per_domain: int = 2
 
     # Sales Persona LLM only (does not change Advisor / scan Azure path).
     persona_gemini_api_key: str = ""

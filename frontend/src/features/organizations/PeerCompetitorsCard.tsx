@@ -49,6 +49,10 @@ export function PeerCompetitorsCard({ organizationId }: { organizationId: string
   const notConfigured = data?.configured === false
   const peers = data?.peers ?? []
 
+  // Nothing useful to show a rep while the server has no search key set up — hide the whole
+  // card rather than surface a visible "not configured yet" state in an otherwise finished UI.
+  if (notConfigured) return null
+
   return (
     <Card className="space-y-4 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -63,7 +67,7 @@ export function PeerCompetitorsCard({ organizationId }: { organizationId: string
           size="sm"
           icon={RefreshCw}
           loading={refresh.isPending}
-          disabled={notConfigured || query.isLoading}
+          disabled={query.isLoading}
           onClick={() => refresh.mutate()}
         >
           Update
@@ -102,13 +106,7 @@ export function PeerCompetitorsCard({ organizationId }: { organizationId: string
         </Alert>
       )}
 
-      {notConfigured && (
-        <Alert variant="info" title="Web search is not configured on the server yet">
-          Peer competitors will be available once a search key is set up.
-        </Alert>
-      )}
-
-      {data && !notConfigured && (
+      {data && (
         <>
           {(data.last_updated_at || data.search_query) && (
             <div className="space-y-0.5 text-caption text-muted">
