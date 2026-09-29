@@ -223,7 +223,13 @@ async def get_scan(
         sources=sources,
         batch_id=run.batch_id,
         error_detail=run.error_detail,
-        changes={},
+        changes={
+            "signals_created": int(run.signals_created or 0),
+            "signals_updated": int(run.signals_updated or 0),
+            "opportunities_created": int(run.opportunities_created or 0),
+            "opportunities_updated": int(run.opportunities_updated or 0),
+            "score_changes": [],
+        },
     )
 
 

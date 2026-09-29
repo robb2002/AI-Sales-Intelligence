@@ -32,7 +32,7 @@ Examples use angle-bracket placeholders. They are not sample organizations, noti
 | Booleans | `true` / `false`. Absent means the field was not allowed, not false |
 | Null | A nullable field is present and `null`. Do not drop the key |
 | Auth header | `Authorization: Bearer <Clerk session token>` on every path except `GET /api/v1/health` |
-| Roles | `SALES_REP` and `SALES_MANAGER`. Both may call every protected **read** endpoint and Scan/Advisor writes. Create and update of organizations is `SALES_MANAGER` only (§6.4–§6.5). List and detail responses are not filtered by user (`FR-ROLE-04`) |
+| Roles | `SALES_REP` and `SALES_MANAGER`. Both may call every protected **read** endpoint and Scan/Advisor writes. Create, update, and delete of organizations is `SALES_MANAGER` only (§6.4–§6.5a). List and detail responses are not filtered by user (`FR-ROLE-04`) |
 
 ### 1.1 Content layers
 
@@ -390,10 +390,10 @@ Detail adds `sources`, `changes`, and `batch_id` (`null` when the run was not pa
   "scope_id": "<uuid>",
   "advisor_status": "answered",
   "answer": {
-    "text": "<prose with fact and interpretation marked in the text>",
+    "text": "<point-wise bullets; optional sparse **bold**; fact and interpretation marked in the text>",
     "segments": [
       {
-        "text": "<sentence>",
+        "text": "<sentence; optional **bold**>",
         "content_layer": "fact",
         "evidence_ids": ["<uuid>"]
       }
@@ -404,7 +404,7 @@ Detail adds `sources`, `changes`, and `batch_id` (`null` when the run was not pa
 }
 ```
 
-`segments` is the structured form of the four layers. A `fact` segment has at least one `evidence_id`. An `interpretation` segment may cite ids. `evidence` resolves those ids to §5.1 objects.
+`segments` is the structured form of the four layers. A `fact` segment has at least one `evidence_id`. An `interpretation` segment may cite ids. `evidence` resolves those ids to §5.1 objects. `answer.text` is the display form (bullets); segment `text` may include sparse `**bold**` markers (no HTML).
 
 When `advisor_status` is `insufficient_evidence` or `out_of_scope`, `answer.segments` is empty and `answer.text` states that result. `evidence` is empty. HTTP status is still 200.
 
@@ -598,7 +598,21 @@ Sets `status` to `rejected` so later scans do not collect the page. Does not del
 
 **Errors:** 400, 401, 403 `INSUFFICIENT_PERMISSION` for `SALES_REP`, 404, 409 on duplicate `website_url`.
 
-There is no DELETE organization endpoint. Managers deactivate tracking instead.
+Deactivating tracking (`tracking_status = inactive`) keeps history and excludes the organization from Scan All. Hard delete is §6.5a.
+
+### 6.5a Delete organization (added 2026-09-28)
+
+| | |
+|---|---|
+| Method / path | `DELETE /api/v1/organizations/{organization_id}` |
+| Auth | Bearer |
+| Roles | `SALES_MANAGER` only |
+
+Permanently removes that organization and **only** its owned rows: sources pages, documents and chunks for that org, signals and evidence, opportunity and scores, peer-competitor rows, advisor sessions and AI interactions scoped to it, and its scan runs. Shared registry `sources` rows (SAM.gov, USAspending, IPEDS) are not deleted. Other organizations are unchanged.
+
+**204:** empty body. The organization is gone.
+
+**Errors:** 401, 403 `INSUFFICIENT_PERMISSION` for `SALES_REP`, 404 if the organization does not exist, 409 `CONFLICT` with `details.field` `scan` when a scan for that organization is `queued` or `running` (finish or wait, then delete).
 
 ### 6.6 Peer competitors (added 2026-09-26)
 
@@ -662,6 +676,9 @@ application's daily search cap is used), `SEARCH_FAILED` (502, the previous list
 |---|---|
 | `organization_id` | Optional UUID |
 | `signal_type` | Optional. Repeatable enum |
+| `state_code` | Optional. Repeatable. Two-letter USPS code of the signal's organization (added 2026-09-28, §10b drill-down) |
+| `organization_type` | Optional. Repeatable. Organization type of the signal's organization (added 2026-09-28, §10b drill-down) |
+| `market_role` | Optional. Repeatable. `target` or `competitor`. Omitted returns both (added 2026-09-28, §10b drill-down) |
 | `state` | Optional. Repeatable enum. Default, when omitted: `validated` only. Pass `state=rejected` to inspect discards. Pass every state explicitly to see all |
 | `date_from` | Optional `YYYY-MM-DD` |
 | `date_to` | Optional `YYYY-MM-DD`. Must be on or after `date_from` |
@@ -896,7 +913,8 @@ Used by the header scan indicator and the organization "last scanned" context. T
 | Field | Rule |
 |---|---|
 | `new_since` | Start of the window for `new_count`. Fixed at 7 days before `generated_at` |
-| `scan_status.state` | `never_scanned`, `current`, `running`, `partial`, `failed` |
+| `scan_status.state` | `never_scanned`, `current`, `running`, `partial`, `failed`. Derived from the latest finished **cohort** (Scan All batch when present, else the latest org run). Org runs with status `partial` (e.g. one page URL failed while others collected) count as healthy → `current`. Mixed healthy + hard-fail/interrupt → `partial`. Interrupted-only → `partial`. `failed` only when that cohort has no successful or soft-success org runs |
+| `scan_status.last_status` | Terminal status of the latest finished org run in that cohort (`succeeded`, `partial`, `failed`, `interrupted`) |
 | `prioritized_opportunities` | At most 5 opportunity summaries, highest score first |
 | `recent_signals` | At most 6 validated signal summaries, newest first |
 | `signal_volume` | 30 items, one per day, oldest first: `{ "date", "count" }`. A day with none is `count` 0, not a missing point |
@@ -951,6 +969,90 @@ validated signal with its evidence (`AI_RAG_DESIGN.md` §26).
 with none returns `signals: []` and the client says no competitor evidence was collected.
 
 **Errors:** 401, 403, 500.
+
+---
+
+## 10b. Trends (added 2026-09-28)
+
+Monthly counts of stored, validated signals from **target** organizations, grouped by
+geography (state), vertical (organization type), and signal type (`PRODUCT_PRD.md` §16a). It is a
+record of what was observed, not a forecast. No model is called. No projection, growth rate, or
+ranking claim is computed.
+
+| | |
+|---|---|
+| Method / path | `GET /api/v1/trends` |
+| Auth | Bearer |
+| Roles | Both |
+| Pagination | None. At most one row per state, organization type, and month |
+
+**Query**
+
+| Parameter | Validation |
+|---|---|
+| `months` | Optional integer, 3 to 12. Default 6. Outside that range is 400 |
+
+**200**
+
+```json
+{
+  "generated_at": "<timestamp>",
+  "data_origin": "live",
+  "window": { "months": 6, "date_from": "<YYYY-MM-DD>", "date_to": "<YYYY-MM-DD>" },
+  "month_keys": ["<YYYY-MM>"],
+  "totals": { "signals": 0, "undated": 0, "organizations": 0 },
+  "by_signal_type": [
+    {
+      "month": "<YYYY-MM>",
+      "counts": {
+        "procurement": 0,
+        "technology_initiative": 0,
+        "leadership_change": 0,
+        "funding_budget": 0,
+        "strategic_announcement": 0,
+        "competitor_vendor": 0,
+        "contract_renewal": 0
+      }
+    }
+  ],
+  "by_state": [
+    { "state_code": "<USPS>", "organizations": 0, "total": 0, "undated": 0, "by_month": [0] }
+  ],
+  "by_organization_type": [
+    { "organization_type": "university", "organizations": 0, "total": 0, "undated": 0, "by_month": [0] }
+  ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| Counted signals | `state` `validated`, organization `market_role` `target`, whatever the organization's `tracking_status`. Competitor organizations are vendors, not buyers, and are excluded |
+| `window` | The current calendar month (UTC) and the `months − 1` months before it. `date_from` is the first day of the oldest month; `date_to` is the day of `generated_at` |
+| Month of a signal | Its source publication date (`date`). A signal with `date_status` `unavailable` is **not** placed in a month and is counted in `undated` instead. The server never guesses a month |
+| `month_keys` | Oldest first, one per month in the window. Every `by_month` array follows this order and has one value per key. A month with none is `0`, not a missing point |
+| `by_signal_type` | One row per month key, oldest first, with all seven types present |
+| `total` | Dated signals inside the window plus that bucket's `undated` signals. `sum(by_month) + undated = total` |
+| `by_state` | One row per state that has at least one target organization, including states with `total` 0. Ordered by `total` descending, then `state_code`. Target organizations with no `state_code` are reported under `state_code` `null` |
+| `by_organization_type` | One row per organization type that has at least one target organization. Same order rule |
+| `organizations` | Target organizations in that bucket, whether or not they produced a signal |
+| `totals.signals` | All counted signals: dated inside the window plus undated. `totals.undated` is the undated part |
+| `totals.organizations` | Distinct target organizations with at least one counted signal |
+| `data_origin` | `cached` if any counted signal is cached. Otherwise `live` |
+
+All zeros is the honest empty result. HTTP 200.
+
+**Drill-down.** Every figure opens `GET /api/v1/signals` (§7.1) with `market_role=target`,
+`date_from` and `date_to` from `window`, and the bucket's `state_code`, `organization_type`, or
+`signal_type`. Because §7.1 keeps undated signals under a date filter, that list returns exactly
+`total` rows for the bucket. The `state_code` `null` bucket has no matching filter, so the client
+shows it without a drill-down link.
+
+A single month (one column or segment of `by_signal_type`) opens the same list with `date_from`
+and `date_to` set to that month. Under the §7.1 rule (C5) that list also contains the undated
+signals of the same filter, so the client says so on arrival rather than implying the list equals
+the month's count.
+
+**Errors:** 400, 401, 403, 500.
 
 ---
 
@@ -1087,6 +1189,13 @@ There is no session list and no delete.
       { "type": "heading", "text": "..." },
       { "type": "paragraph", "text": "...", "layer": "interpretation", "refs": [1] },
       { "type": "bullets", "items": [{ "text": "...", "layer": "fact", "refs": [1, 2] }] },
+      {
+        "type": "table",
+        "headers": ["Item", "Detail"],
+        "rows": [["...", "..."]],
+        "layer": "interpretation",
+        "refs": [1]
+      },
       { "type": "email", "subject": "...", "body": "..." }
     ]
   },
@@ -1099,9 +1208,11 @@ There is no session list and no delete.
 }
 ```
 
-`status` is `answered` or `unavailable`. `layer` is `fact`, `interpretation`, or
-`recommended_action`. A `fact` always has at least one ref. `sources[].kind` is
-`stored_evidence`, `official_website`, `live_lookup`, or `system_data`. `email` is a draft only.
+`status` is `answered` or `unavailable`. `layer` is `fact`, `interpretation`,
+`potential_opportunity`, or `recommended_action`. A `fact` always has at least one ref.
+`sources[].kind` is `stored_evidence`, `official_website`, `live_lookup`, or `system_data`.
+`email` is a draft only. `table` is optional for compare/summary answers when CONTEXT supports
+the cells; paragraph and bullet text may include sparse `**bold**` markers (no HTML).
 
 **Errors:** 401, 403, 422 (validation), 500.
 
@@ -1119,6 +1230,7 @@ Search and filters are query parameters on the list routes. They are collected h
 | Opportunities by band, type, state, date | `GET /api/v1/opportunities` §8.1 |
 | Sort opportunities by score or recency | `sort=score` or `sort=updated_at` |
 | Competitor/vendor list | `GET /api/v1/signals?signal_type=competitor_vendor` |
+| Trend drill-down by state, vertical, or type | `GET /api/v1/signals?market_role=target&date_from=&date_to=` plus `state_code`, `organization_type`, or `signal_type` (§10b) |
 
 Repeated query keys are arrays: `signal_type=procurement&signal_type=funding_budget`.
 
@@ -1150,7 +1262,7 @@ The server never trusts a client-sent role, score, evidence URL, or organization
 | Login, logout, password, token refresh | Clerk |
 | Role assignment | A database row during the hackathon |
 | Create or edit signal or opportunity | Read-only intelligence. Changes come from scans |
-| Delete organization | Managers set `tracking_status` to `inactive` instead |
+| Soft-delete / archive without removing rows | Managers set `tracking_status` to `inactive` (§6.5). Hard delete is §6.5a |
 | Unbounded open-web organization discovery (any domain) | Out of MVP |
 | CRM, email-sending, or notification endpoints | Out of MVP. Draft email text inside the Sales Persona answer (§12.3) is allowed; nothing is sent |
 | A free-form URL ingest endpoint for arbitrary pages or third-party sources | Collection is the scan pipeline and the source register in `DATA_SOURCES.md`. Managers may set only the organization's official `website_url` (§6.4–§6.5) and same-host official page URLs (§6.3a) |

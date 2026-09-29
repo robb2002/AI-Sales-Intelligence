@@ -453,6 +453,7 @@ Fixed assignments so the same concept is never drawn two ways.
 | Organizations | `Building2` |
 | Signals | `Radio` |
 | Opportunities | `Target` |
+| Trends | `TrendingUp` |
 | AI Advisor | `Sparkles` |
 | Evidence | `FileText` |
 | Source link | `ExternalLink` |
@@ -723,6 +724,9 @@ Library: Recharts, per `AGENTS.md` §11.
 | Opportunity score distribution | Vertical bar, 4 band columns | Dashboard |
 | Competitor/vendor activity | Horizontal bar | Dashboard |
 | Score history | Sparkline, 64×24px, no axes | Opportunity detail |
+| Monthly signals by type | Vertical bar, stacked by signal type (§2.6 colors), one column per month | Trends (§28a) |
+| Signals by state | Horizontal bar, one bar per state, sorted by total | Trends (§28a) |
+| Signals by vertical | Horizontal bar, one bar per organization type | Trends (§28a) |
 
 Pie and donut charts are permitted only for the signal type distribution and only if a horizontal
 bar proves insufficient — bars are preferred because seven categories are hard to read in a pie.
@@ -948,7 +952,7 @@ AI conclusions.
 Persistent left sidebar plus top header. No secondary top navigation, no breadcrumb bar except on
 detail pages.
 
-**Primary items:** Dashboard, Organizations, Signals, Opportunities, AI Advisor.
+**Primary items:** Dashboard, Organizations, Signals, Opportunities, Trends, AI Advisor.
 
 **Routes and titles**
 
@@ -961,6 +965,7 @@ detail pages.
 | `/signals/:id` | Signal detail |
 | `/opportunities` | Potential Opportunities |
 | `/opportunities/:id` | *Organization name* — Potential Opportunity |
+| `/trends` | Trends |
 | `/advisor` | AI Sales Advisor |
 | `/login` | — |
 
@@ -1111,14 +1116,19 @@ hold; it does not change the data.
 `text-caption` `text-muted`, naming sources covered. Tracking status is a `soft-neutral` or
 `soft-positive` badge beside the name for every role.
 
-**Manager actions** (`FR-ROLE-05`, `FR-ORG-09`, `FR-ORG-10`): on the shared Organizations list and profile,
-only `SALES_MANAGER` sees **Add organization**, **Edit**, and a segmented **tracking control**
+**Manager actions** (`FR-ROLE-05`, `FR-ORG-09`, `FR-ORG-10`, `FR-ORG-11`): on the shared Organizations list and profile,
+only `SALES_MANAGER` sees **Add organization**, **Edit**, a segmented **tracking control**
 (Inactive | Active text inside the control — navy selected segment, not green/red alone) placed
-beside **Edit**. Profile header actions: **Edit**, tracking control, **Scan Now** (shared `h-10`
-height). On the Sources section managers see **Add official page**. Adding a page URL requires live
-validation on the organization's official host; failure shows an alert and does not persist.
-Managers may **Reject** an approved page so later scans skip it. `SALES_REP` sees the same pages
-without those write controls. There is still no separate manager shell (U4).
+beside **Edit**, and **Delete**. Profile header actions: **Edit**, tracking control, **Delete**,
+**Scan Now** (shared `h-10` height). **Delete** opens a confirm dialog that names the organization,
+states that its signals, opportunities, evidence, documents, and scans will be removed, and
+requires an explicit confirm. On success the client leaves the profile for the Organizations
+list (or Competitors when the deleted row was a competitor). On the Sources section managers see
+**Add official page**. Adding a page URL requires live validation on the organization's official
+host; failure shows an alert and does not persist. Managers may **Reject** an approved page so
+later scans skip it. Competitor cards on the Competitors page expose the same manager **Delete**
+control. `SALES_REP` sees the same pages without those write controls. There is still no separate
+manager shell (U4).
 
 **Reference band** (`FR-ORG-02`): a distinct `surface-sunken` strip, **not** a card, carrying the
 `text-label` heading "INSTITUTIONAL REFERENCE (NCES IPEDS)" and a right-aligned `soft-neutral`
@@ -1174,17 +1184,78 @@ Single column, max-width 960px, with evidence inline rather than in a rail — a
 enough that separation would be artificial.
 
 1. **Header** — `SignalTypeBadge`, `SignalStateBadge`, title (`text-h1`), organization link, and
-   observed/published date or the "date unavailable" treatment (`FR-SIG-09`, `FR-SIG-10`).
-2. **Observed content** (`FR-SIG-14`) — `text-label` "WHAT THE SOURCE STATED" over the extracted
-   factual content on a white surface.
-3. **AI summary** — `AiInlineNote`, present only when one exists, clearly separated from 2.
+   observed/published date or the "date unavailable" treatment (`FR-SIG-09`, `FR-SIG-10`). Quick
+   actions: Ask Advisor (org-scoped), more signals for the org, and open primary source when evidence
+   exists.
+2. **Observed content** (`FR-SIG-14`) — `text-label` "OBSERVED FACT" over the extracted
+   factual content on a white surface, with a short caption that this is source text, not a prediction.
+3. **AI summary** — Readable interpretation (lead sentence + bullets from stored text only), present
+   only when one exists, clearly separated from 2. Does not invent content.
 4. **Sources** (`FR-SIG-11`, `FR-SIG-12`) — `text-label` "SOURCES (3)" over the full
-   `EvidenceList`. When the signal is clustered, an `info` alert states that these sources describe
+   `EvidenceList`. Each evidence card leads with "Why it matters" (`relationship`) then the verbatim
+   snippet. When the signal is clustered, an `info` alert states that these sources describe
    the same event and were merged.
-5. **Contributing to** (`FR-SIG-13`) — linked `OpportunityCard`s, or an explicit "This signal does
-   not currently contribute to any potential opportunity", which is informative rather than empty.
+5. **Contributing to** (`FR-SIG-13`) — linked `OpportunityCard`s, or an explicit note that another
+   related validated signal is usually needed before a potential opportunity is formed.
 6. **Rejection reason** (`FR-SIG-15`) — for rejected signals, a `soft-neutral` panel at the top
    stating why, so the user sees it before the content.
+
+---
+
+## 28a. Trends (added 2026-09-28)
+
+Where observed activity is concentrated, by month, geography, and vertical (`PRODUCT_PRD.md`
+§16a). Data is `GET /api/v1/trends` (`API_CONTRACT.md` §10b). This is a product surface, not an AI
+surface: no `AiPanel`, no indigo, no AI label.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ Trends                                         [ Last 6 months ▾ ]     │
+│ Validated signals from N target organizations, by the month the        │
+│ source published them. A record of what was observed — not a forecast. │
+├────────────────────────────────────────────────────────────────────────┤
+│ SIGNALS BY MONTH AND TYPE                                              │
+│ ┌────────────────────────────────────────────────────────────────────┐ │
+│ │ stacked vertical bars, one column per month, seven type colors     │ │
+│ └────────────────────────────────────────────────────────────────────┘ │
+├───────────────────────────────────┬────────────────────────────────────┤
+│ BY STATE                          │ BY VERTICAL                        │
+│ ┌───────────────────────────────┐ │ ┌────────────────────────────────┐ │
+│ │ horizontal bars, by total     │ │ │ horizontal bars, by org type   │ │
+│ └───────────────────────────────┘ │ └────────────────────────────────┘ │
+│ N signals have no publication date and are not placed in a month.     │
+└───────────────────────────────────┴────────────────────────────────────┘
+```
+
+**Header.** Page title plus a `Select` for the window: 3, 6 (default), or 12 months. Below it, a
+`text-body-sm` `text-secondary` basis line stating the counted signals and organizations
+(`totals`), the publication-month rule, and that the view is not a forecast. The basis line is
+always shown so the user can judge how thin the data is. No minimum-data threshold hides a chart.
+
+**Monthly chart.** Primary chart (320px). Columns follow `month_keys`, oldest left. Series use the
+§2.6 signal type colors. The tooltip lists each type's count for that month. Clicking a segment
+opens Signals filtered to that type, target organizations, and that month. Because the Signals list
+keeps undated signals under a date filter (`API_CONTRACT.md` §7.1, C5), the list shows an `info`
+alert that undated signals of that type are included.
+
+**By state / by vertical.** Two standard charts (240px) side by side at `lg` and above, stacked
+below. Each bar shows its total, and the tooltip shows `organizations` and the month-by-month
+counts. Clicking a bar opens Signals filtered to that state or organization type, target
+organizations, and the window (`FR-DASH-08` rule). A state with `total` 0 still appears, so
+"no observed activity" is visible. The `null` state bucket is labelled "State not recorded" and is
+not clickable.
+
+**Undated line.** When `totals.undated` is above 0, a `text-caption` `text-muted` line with the
+`CalendarOff` icon states how many signals have no publication date and are not placed in a month
+(§37.2). They still count in the state and vertical totals.
+
+**Forbidden here.** Forecast lines, projections, growth percentages, "fastest-growing" rankings,
+maps, and green/red trend coloring (§25: more signals is neither healthy nor risky). Competitor
+organizations never appear in these counts.
+
+**Cached data.** If `data_origin` is `cached`, the §37.3 notice sits below the page title.
+
+**Empty.** All zeros renders the §35 "No trend data yet" empty state instead of empty axes (§17.1).
 
 ---
 
@@ -1399,6 +1470,7 @@ description capped at 48ch, and an optional primary action.
 | No search results | No organizations found | Search covers organizations tracked by the system. | — |
 | Empty conversation | Ask about this organization | The Advisor answers from collected evidence about this organization. | Suggested questions |
 | Signal in no opportunity | Not part of a potential opportunity | This signal has not been correlated with other signals yet. | — |
+| No trend data (trends) | No trend data yet | Trends appear after scans collect validated signals from target organizations. | Go to Organizations |
 
 **Rules.** Empty is never blank. The copy distinguishes "nothing was found" from "nothing was
 collected" — the first is a product answer, the second is a prompt to act (P5). No illustrations
@@ -1464,9 +1536,10 @@ renders normally, because none of it depends on the model.
 
 ### 37.5 Partial results
 
-When a scan completed with some sources failing, affected lists carry an `attention` alert:
-"These results are incomplete — 1 of 4 sources failed during the last scan", linking to the scan
-detail. Incomplete data is never presented as complete.
+On organization Scan Now completion (`succeeded` or `partial`), the profile shows a **success**
+outcome summary: new signals, potential opportunities, and pages refreshed when available. Per-URL
+collection issues appear only as a calm secondary note (not a warning title). Hard scan failure
+(`failed`) keeps an `error` alert. Incomplete data is never presented as complete.
 
 ---
 

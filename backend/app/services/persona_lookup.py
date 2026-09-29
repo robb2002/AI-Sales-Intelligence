@@ -68,6 +68,7 @@ async def lookup_domains(
     domains: list[str],
     allowed: set[str],
     query: str,
+    max_pages_override: int | None = None,
 ) -> list[LiveLookupResult]:
     """Look up several allow-listed domains in parallel (different hosts do not block each other)."""
     if not settings.persona_live_lookup_enabled or not domains:
@@ -76,7 +77,9 @@ async def lookup_domains(
     if not safe:
         return []
     per_domain = max(1, settings.persona_max_live_pages_per_domain)
-    if len(safe) > 2:
+    if max_pages_override is not None:
+        per_domain = max(1, min(per_domain, max_pages_override))
+    elif len(safe) > 2:
         per_domain = min(per_domain, 2)
     terms = query_terms(query)
     async with create_http_client(settings) as client:

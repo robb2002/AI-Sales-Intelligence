@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session, require_roles
@@ -104,6 +104,16 @@ async def update_organization(
     return await org_service.update_organization(
         session, organization_id, body, settings=request.app.state.settings
     )
+
+
+@router.delete("/organizations/{organization_id}", status_code=204)
+async def delete_organization(
+    organization_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[CurrentUser, Depends(require_manager)],
+) -> Response:
+    await org_service.delete_organization(session, organization_id)
+    return Response(status_code=204)
 
 
 @router.post(

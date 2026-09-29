@@ -148,7 +148,7 @@ cache clear.
 After the token verifies:
 
 1. Read the Clerk user id from the verified token.
-2. Load the Clerk user profile with the backend secret (email and `publicMetadata.role`).
+2. Load the Clerk user profile with the backend secret (email and `publicMetadata.role`). The backend may cache that profile briefly (minutes) so frequent status polls do not call Clerk on every request; token verification still runs every time.
 3. If `publicMetadata.role` is missing, return `403` with `USER_NOT_PROVISIONED`. Do not invent a role.
 4. If the role is present but is not exactly `SALES_REP` or `SALES_MANAGER`, return `403` with
    `USER_WITHOUT_ROLE`.
@@ -171,12 +171,12 @@ only.
 | Code | UI label | MVP access |
 |---|---|---|
 | `SALES_REP` | Sales Representative | Every tracked organization (view), every MVP screen, Scan Now, Scan All, AI Sales Advisor. Cannot create or update organizations |
-| `SALES_MANAGER` | Sales Manager | The same view set, plus create/update organization identity and activate/deactivate tracking. No separate manager-only application shell |
+| `SALES_MANAGER` | Sales Manager | The same view set, plus create/update/delete organization identity and activate/deactivate tracking. No separate manager-only application shell |
 
 `FR-ROLE-01` — one role per user.
 `FR-ROLE-03` — both roles see the same evidence.
 `FR-ROLE-04` — queries are not filtered by the calling user.
-`FR-ROLE-05` — only `SALES_MANAGER` may create or update organizations (`API_CONTRACT.md` §6.4–§6.5).
+`FR-ROLE-05` — only `SALES_MANAGER` may create, update, or delete organizations (`API_CONTRACT.md` §6.4–§6.5a).
 
 ### 6.1 How a Clerk user receives a role
 

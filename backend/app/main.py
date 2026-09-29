@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import uuid
@@ -10,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import protected_router, public_router
 from app.core.config import Settings, get_settings
-from app.core.database import create_engine, create_session_factory
+from app.core.database import create_engine, create_session_factory, warm_pool
 from app.core.errors import AppError, error_body, register_exception_handlers
 from app.core.logging import configure_logging, request_id_var
 from app.core.security import ClerkClient
@@ -57,10 +58,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         from app.scheduler import create_scheduler
+        from app.services.indexing_worker import sweep_unindexed_documents
         from app.services.scans import mark_interrupted_on_startup
 
         session_factory = create_session_factory(engine)
+        warm_up = asyncio.create_task(warm_pool(engine))
         await mark_interrupted_on_startup(session_factory)
+        await sweep_unindexed_documents(
+            session_factory=session_factory, settings=settings
+        )
         scheduler = create_scheduler(settings, session_factory)
         if scheduler is not None:
             scheduler.start()
@@ -74,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 },
             )
         yield
+        warm_up.cancel()
         if scheduler is not None:
             scheduler.shutdown(wait=False)
         await engine.dispose()
@@ -97,7 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
         expose_headers=["X-Request-ID"],
     )

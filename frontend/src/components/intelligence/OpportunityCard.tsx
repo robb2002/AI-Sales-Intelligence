@@ -1,8 +1,8 @@
 import { Link } from 'react-router'
 import type { OpportunitySummary } from '../../types/api'
 import {
+  FACTOR_LABELS,
   ORG_TYPE_LABELS,
-  SIGNAL_TYPE_DOT,
   formatUpdatedAt,
 } from '../../features/intelligence/labels'
 import { cn } from '../../lib/cn'
@@ -11,6 +11,11 @@ import { ScoreBandBadge } from './ScoreDisplay'
 
 export function OpportunityCard({ opportunity }: { opportunity: OpportunitySummary }) {
   const high = opportunity.score.band === 'high'
+  const topFactors = [...opportunity.score.factors]
+    .filter((f) => f.points > 0)
+    .sort((a, b) => b.points - a.points)
+    .slice(0, 3)
+
   return (
     <Link
       to={`/opportunities/${opportunity.opportunity_id}`}
@@ -22,10 +27,13 @@ export function OpportunityCard({ opportunity }: { opportunity: OpportunitySumma
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-h3 text-primary">{opportunity.organization_name}</h3>
             <Badge variant="soft-opportunity">Potential opportunity</Badge>
+            {opportunity.data_origin === 'cached' ? (
+              <Badge variant="soft-neutral">Cached</Badge>
+            ) : null}
           </div>
           <p className="mt-1 text-caption text-secondary">
             {ORG_TYPE_LABELS[opportunity.organization_type] ?? opportunity.organization_type}
@@ -33,22 +41,33 @@ export function OpportunityCard({ opportunity }: { opportunity: OpportunitySumma
             {' · '}
             Updated {formatUpdatedAt(opportunity.updated_at)}
           </p>
-          <p className="mt-3 flex flex-wrap items-center gap-2 text-body-sm text-secondary">
-            <span>
-              {opportunity.signal_count} signal{opportunity.signal_count === 1 ? '' : 's'}
-            </span>
-            <span className="flex items-center gap-1" aria-hidden>
-              {Object.values(SIGNAL_TYPE_DOT)
-                .slice(0, Math.min(4, opportunity.signal_count || 1))
-                .map((cls, i) => (
-                  <span key={i} className={cn('size-1.5 rounded-full', cls)} />
-                ))}
-            </span>
+
+          <p className="mt-3 text-body-sm text-secondary">
+            {opportunity.signal_count} correlated signal
+            {opportunity.signal_count === 1 ? '' : 's'}
+            {opportunity.score.explanation_status === 'ready' ? ' · AI explanation ready' : ''}
           </p>
+
+          {topFactors.length > 0 && (
+            <ul className="mt-3 flex flex-wrap gap-1.5">
+              {topFactors.map((factor) => (
+                <li key={factor.key}>
+                  <span className="inline-flex items-center rounded-md bg-surface-sunken px-2 py-0.5 text-caption text-secondary">
+                    {FACTOR_LABELS[factor.key] ?? factor.key}
+                    <span className="ml-1 tabular-nums text-primary">
+                      {factor.points}/{factor.max_points}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        <div className="text-right">
+
+        <div className="shrink-0 text-right">
           <p className="text-metric tabular-nums text-primary">{opportunity.score.value}</p>
-          <div className="mt-1 flex justify-end">
+          <p className="text-caption text-muted">/ 100</p>
+          <div className="mt-1.5 flex justify-end">
             <ScoreBandBadge band={opportunity.score.band} />
           </div>
         </div>

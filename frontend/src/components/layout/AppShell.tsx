@@ -10,6 +10,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/organizations': 'Organizations',
   '/signals': 'Signals',
   '/opportunities': 'Potential Opportunities',
+  '/trends': 'Trends',
   '/competitors': 'Competitors',
   '/advisor': 'AI Sales Advisor',
 }

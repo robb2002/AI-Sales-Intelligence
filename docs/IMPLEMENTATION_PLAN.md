@@ -65,13 +65,14 @@ Do not start these until the should-have list in progress is actually done.
 | N4 | Organization timeline tab |
 | N5 | Playwright for a JavaScript-only page |
 | N6 | Approximate vector index |
+| N7 | Trends page: observed monthly counts by type, state, and vertical (`PRODUCT_PRD.md` §16a, `API_CONTRACT.md` §10b). Added 2026-09-28 |
 
 ### If the week slips, cut in this order
 
 Cut from the top of this list first. Never cut evidence, the rules score, or the insufficient-evidence path to save time.
 
 1. S7 scheduled scan. Scan Now is the demo. This is the first feature dropped if time is limited
-2. N1–N6
+2. N1–N7
 3. S6 sparkline, S5 extra websites, S4 USAspending, S3 IPEDS. IPEDS and USAspending are deferred for the first demo
 4. S1 dashboard and S2 filters
 5. S8 tier-4 dedup
@@ -462,7 +463,7 @@ These six items stay open on purpose. Resolve them during implementation and val
 1. **Initial organizations.** Select the first two TARGET organizations only after validating real evidence from SAM.gov or the organization's official website. Do not hard-code organization names into business logic. Store them as database records (`DATA_SOURCES.md` §5.3).
 2. **SAM.gov production endpoint.** Validate the documented production paths with the issued API key. Use only the path that returns a successful response. Do not invent or assume an endpoint (`DATA_SOURCES.md` D1).
 3. **SAM.gov API quota.** The 10-request daily cap is an MVP safeguard. Verify the quota on the issued key before raising or changing that cap. Do not describe the temporary cap as SAM.gov's official quota (`DATA_SOURCES.md` D2).
-4. **LLM and embedding model.** Both stay configurable behind adapters. **Updated 2026-09-25:** chat `interns-gpt-4.1` (`LLM_MODEL`); embeddings Azure `text-embedding-3-small` (`EMBEDDING_MODEL`), vector width 1536.
+4. **LLM and embedding model.** Both stay configurable behind adapters. **Updated 2026-09-27:** chat `interns-gpt-4.1` (`LLM_MODEL`); embeddings Azure `text-embedding-ada-002` (`EMBEDDING_MODEL`), vector width 1536. Indexing runs in-process in the background and does not block Scan Now / Scan All.
 5. **Hosting.** The hosting target stays open. Do not add hosting-specific architecture until that target is selected.
 6. **Live scan duration.** Measure the real end-to-end scan during implementation. Do not set an artificial performance target before that measurement exists (`PRODUCT_PRD.md` Q8).
 
@@ -476,4 +477,4 @@ Before full Phase 4 Scan Now, the dashboard Scan Now control may run **discovery
 
 **Updated 2026-09-24.** Scan All also runs SAM.gov in parallel with website collection for the batch: one shared search (plus at most a few documented `title` searches when needed), local org match, store under `documents` with `source_id` = `sam_gov` (M3). Application cap 10 requests / 24 hours.
 
-**Updated 2026-09-24.** After documents are stored, the same scan extracts signals with the LLM adapter, validates snippets in code, and writes `signals` + `evidence` (M5). Dedup (M6) then runs deterministically: content-hash skip, external-id merge, and strong tier-3 merges (exact snippet or exact normalized title within 30 days). Embedding tier 4 stays deferred (S8). Correlation, rules score, and Advisor remain later slices. USAspending (S4) and IPEDS (S3) stay deferred.
+**Updated 2026-09-24.** After documents are stored, the same scan extracts signals with the LLM adapter, validates snippets in code, and writes `signals` + `evidence` (M5). Dedup (M6) then runs deterministically: content-hash skip, external-id merge, and strong tier-3 merges (exact snippet or exact normalized title within 30 days). Embedding tier 4 stays deferred (S8). **Updated 2026-09-28:** USAspending (S4) is wired into Scan Now / Scan All for TARGET orgs that resolve to one compatible recipient; IPEDS (S3) stays deferred.

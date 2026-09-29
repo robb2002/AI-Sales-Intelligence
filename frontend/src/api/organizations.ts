@@ -72,6 +72,12 @@ export function updateOrganization(
   })
 }
 
+export function deleteOrganization(organizationId: string): Promise<void> {
+  return apiRequest<void>(`/api/v1/organizations/${organizationId}`, {
+    method: 'DELETE',
+  })
+}
+
 export function listOrganizationSources(
   organizationId: string,
   params?: { status?: string[] },

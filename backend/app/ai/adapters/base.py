@@ -72,3 +72,16 @@ class LLMProviderAdapter(Protocol):
         """Explain a rules-computed score. Must repeat score_value and score_band.
         Must not invent or alter the numeric total."""
         ...
+
+    async def recommend_action(
+        self,
+        *,
+        organization_name: str,
+        score_value: int,
+        score_band: str,
+        correlation_text: str,
+        records: list[dict[str, str]],
+    ) -> dict[str, object]:
+        """Suggest one evidence-backed next research/action (AI_RAG_DESIGN.md §27).
+        Returns {"text": str, "evidence_ids": list[str]} using only supplied record ids."""
+        ...

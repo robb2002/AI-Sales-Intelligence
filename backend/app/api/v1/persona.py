@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.adapters.azure_openai import create_llm_adapter
 from app.ai.adapters.embeddings import get_embedding_adapter
+from app.ai.adapters.gemini_persona import create_persona_llm
 from app.api.deps import get_session, require_app_user
 from app.core.config import get_settings
 from app.core.security import CurrentUser
@@ -24,7 +24,7 @@ async def send_persona_message(
     return await persona_service.reply(
         session,
         settings=settings,
-        llm=create_llm_adapter(settings),
+        llm=create_persona_llm(settings),
         embedder=get_embedding_adapter(settings),
         message=body.message,
         history=body.history,

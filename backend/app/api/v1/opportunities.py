@@ -9,11 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_session, require_app_user
+from app.ai.adapters import create_llm_adapter
+from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationAppError
 from app.core.security import CurrentUser
-from app.repositories import evidence as evidence_repo
 from app.repositories import opportunities as opportunities_repo
-from app.repositories import opportunity_scores as scores_repo
+from app.repositories.evidence import Evidence
+from app.repositories.opportunities import Opportunity, OpportunitySignal
 from app.repositories.opportunity_scores import OpportunityScore
 from app.repositories.organizations import ORGANIZATION_TYPES, Organization
 from app.repositories.signals import Signal
@@ -29,6 +31,7 @@ from app.schemas.opportunities import (
     ScorePayload,
 )
 from app.schemas.signals import EvidenceItem, SignalSummary
+from app.services.opportunity_correlation import ensure_recommended_action
 
 router = APIRouter(tags=["opportunities"])
 
@@ -98,22 +101,53 @@ async def get_opportunity(
     session: Annotated[AsyncSession, Depends(get_session)],
     _: Annotated[CurrentUser, Depends(require_app_user)],
 ) -> OpportunityDetail:
-    opportunity = await opportunities_repo.get_by_id(session, opportunity_id)
-    if opportunity is None:
+    found_opportunity = (
+        await session.execute(
+            select(Opportunity, Organization)
+            .outerjoin(Organization, Organization.organization_id == Opportunity.organization_id)
+            .where(Opportunity.opportunity_id == opportunity_id)
+        )
+    ).first()
+    if found_opportunity is None:
         raise NotFoundError("opportunity")
-    organization = await session.get(Organization, opportunity.organization_id)
+    opportunity, organization = found_opportunity
     if organization is None:
         raise NotFoundError("organization")
 
-    score = await scores_repo.latest_for_opportunity(session, opportunity_id)
-    previous = await _previous_score_value(session, opportunity_id, score)
-    signal_ids = await opportunities_repo.list_signal_ids(session, opportunity_id)
-    signal_rows: list[Signal] = []
-    for sid in signal_ids:
-        row = await session.get(Signal, sid)
-        if row is not None:
-            signal_rows.append(row)
-    evidence_counts = await evidence_repo.count_for_signals(session, signal_ids)
+    # Latest and previous score in one query (newest first).
+    recent_scores = (
+        await session.execute(
+            select(OpportunityScore)
+            .where(OpportunityScore.opportunity_id == opportunity_id)
+            .order_by(OpportunityScore.scored_at.desc())
+            .limit(2)
+        )
+    ).scalars().all()
+    score = recent_scores[0] if recent_scores else None
+    previous = recent_scores[1].value if len(recent_scores) > 1 else None
+
+    signal_rows = list(
+        (
+            await session.execute(
+                select(Signal)
+                .join(OpportunitySignal, OpportunitySignal.signal_id == Signal.signal_id)
+                .where(OpportunitySignal.opportunity_id == opportunity_id)
+            )
+        ).scalars().all()
+    )
+    signal_ids = [row.signal_id for row in signal_rows]
+
+    evidence_by_signal: dict[UUID, list[tuple]] = {}
+    if signal_ids:
+        found_evidence = await session.execute(
+            select(Evidence, Source.name)
+            .outerjoin(Source, Source.source_id == Evidence.source_id)
+            .where(Evidence.signal_id.in_(signal_ids))
+            .order_by(Evidence.created_at)
+        )
+        for ev, joined_source_name in found_evidence.all():
+            evidence_by_signal.setdefault(ev.signal_id, []).append((ev, joined_source_name))
+
     signal_summaries = [
         SignalSummary(
             signal_id=row.signal_id,
@@ -125,7 +159,7 @@ async def get_opportunity(
             summary=row.summary,
             date=row.published_on,
             date_status="available" if row.published_on else "unavailable",
-            source_count=evidence_counts.get(row.signal_id, 0),
+            source_count=len(evidence_by_signal.get(row.signal_id, [])),
             data_origin=row.data_origin,
         )
         for row in signal_rows
@@ -134,12 +168,9 @@ async def get_opportunity(
     evidence_items: list[EvidenceItem] = []
     evidence_ids: list[UUID] = []
     for sid in signal_ids:
-        for ev in await evidence_repo.list_for_signal(session, sid):
-            source_name = organization.name
+        for ev, joined_source_name in evidence_by_signal.get(sid, []):
             if ev.source_id is not None:
-                source = await session.get(Source, ev.source_id)
-                if source is not None:
-                    source_name = source.name
+                source_name = joined_source_name or organization.name
             else:
                 source_name = f"{organization.name} official website"
             evidence_items.append(
@@ -160,6 +191,23 @@ async def get_opportunity(
     summary = _summary(
         opportunity, organization, score, len(signal_ids), previous_value=previous
     )
+
+    # Backfill §27 for opportunities created before recommend was wired (one LLM call).
+    if not opportunity.recommended_action_text and signal_rows and score is not None:
+        settings = get_settings()
+        if settings.llm_configured:
+            await ensure_recommended_action(
+                session,
+                create_llm_adapter(settings),
+                opportunity=opportunity,
+                org=organization,
+                score_value=score.value,
+                score_band=score.band,
+                signals=signal_rows,
+            )
+            if opportunity.recommended_action_text:
+                await session.commit()
+
     recommended = None
     if opportunity.recommended_action_text:
         recommended = RecommendedActionPayload(
@@ -250,21 +298,3 @@ def _score_payload(
         previous_value=previous_value,
         scored_at=score.scored_at,
     )
-
-
-async def _previous_score_value(
-    session: AsyncSession, opportunity_id: UUID, current: OpportunityScore | None
-) -> int | None:
-    if current is None:
-        return None
-    rows = (
-        await session.execute(
-            select(OpportunityScore)
-            .where(OpportunityScore.opportunity_id == opportunity_id)
-            .order_by(OpportunityScore.scored_at.desc())
-            .limit(2)
-        )
-    ).scalars().all()
-    if len(rows) < 2:
-        return None
-    return rows[1].value

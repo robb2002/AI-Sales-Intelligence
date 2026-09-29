@@ -7,6 +7,8 @@ import { getOpportunity } from '../../api/opportunities'
 import { AdvisorPanel } from '../../components/intelligence/AdvisorPanel'
 import { AiPanel } from '../../components/intelligence/AiPanel'
 import { EvidenceList } from '../../components/intelligence/EvidenceList'
+import { ReadableAiBody } from '../../components/intelligence/ReadableInterpretation'
+import { RecommendedActionBody } from '../../components/intelligence/RecommendedActionBody'
 import { ScoreDisplay } from '../../components/intelligence/ScoreDisplay'
 import { SignalCard } from '../../components/intelligence/SignalCard'
 import { Badge } from '../../components/ui/Badge'
@@ -30,6 +32,8 @@ export function OpportunityDetailPage() {
     queryKey: ['opportunity', opportunityId],
     queryFn: () => getOpportunity(opportunityId),
     enabled: Boolean(opportunityId),
+    // First open may backfill recommended_action via one LLM call.
+    staleTime: 30_000,
   })
 
   const pageTitle = query.data
@@ -76,29 +80,69 @@ export function OpportunityDetailPage() {
   }
 
   const opportunity = query.data
+  const signalTypes = [...new Set(opportunity.signals.map((s) => s.signal_type))]
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0 space-y-3">
           <p className="text-caption text-secondary">
             <Link to="/opportunities" className="hover:underline">
               Potential Opportunities
             </Link>
             {' / '}
-            <span className="text-primary">{opportunity.organization_name}</span>
+            <Link
+              to={`/organizations/${opportunity.organization_id}`}
+              className="text-primary hover:underline"
+            >
+              {opportunity.organization_name}
+            </Link>
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <h2 className="text-h1 text-primary">{opportunity.organization_name}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-h1 text-primary">{opportunity.organization_name}</h1>
             <Badge variant="soft-opportunity">Potential opportunity</Badge>
+            {opportunity.data_origin === 'cached' ? (
+              <Badge variant="soft-neutral">Cached</Badge>
+            ) : null}
           </div>
-          <p className="mt-2 text-body-sm text-secondary">
+          <p className="text-body-sm text-secondary">
             {ORG_TYPE_LABELS[opportunity.organization_type] ?? opportunity.organization_type}
             {opportunity.state_code ? ` · ${opportunity.state_code}` : ''}
             {' · '}
             Updated {formatUpdatedAt(opportunity.updated_at)}
-            {opportunity.data_origin === 'cached' ? ' · Cached data' : ''}
+            {' · '}
+            {opportunity.signal_count} correlated signal
+            {opportunity.signal_count === 1 ? '' : 's'}
           </p>
+          {signalTypes.length > 0 && (
+            <ul className="flex flex-wrap gap-1.5">
+              {signalTypes.map((type) => (
+                <li key={type}>
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-surface-sunken px-2 py-0.5 text-caption text-secondary">
+                    <span
+                      className={cn('size-1.5 rounded-full', SIGNAL_TYPE_DOT[type])}
+                      aria-hidden
+                    />
+                    {SIGNAL_TYPE_LABELS[type]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to={`/organizations/${opportunity.organization_id}`}
+              className="inline-flex h-8 items-center rounded-md border border-default bg-surface px-3 text-body-sm font-medium text-navy-600 hover:bg-surface-sunken"
+            >
+              View organization
+            </Link>
+            <Link
+              to={`/signals?organization_id=${opportunity.organization_id}`}
+              className="inline-flex h-8 items-center rounded-md border border-default bg-surface px-3 text-body-sm font-medium text-navy-600 hover:bg-surface-sunken"
+            >
+              Org signals
+            </Link>
+          </div>
         </div>
         <Button variant="ai" icon={Sparkles} onClick={() => setAdvisorOpen((v) => !v)}>
           {advisorOpen ? 'Hide Advisor' : 'Ask Advisor'}
@@ -120,6 +164,9 @@ export function OpportunityDetailPage() {
 
           <section>
             <p className="text-label text-secondary uppercase">Observed signals</p>
+            <p className="mt-1 text-caption text-muted">
+              Validated facts that were correlated into this potential opportunity
+            </p>
             <div className="mt-3 space-y-3">
               {opportunity.signals.map((signal) => (
                 <SignalCard key={signal.signal_id} signal={signal} />
@@ -128,8 +175,8 @@ export function OpportunityDetailPage() {
           </section>
 
           <AiPanel label="correlation">
-            <p>{opportunity.correlation.text}</p>
-            <ul className="relative mt-5 space-y-0 border-l border-navy-200 pl-5">
+            <ReadableAiBody text={opportunity.correlation.text} tone="dark" />
+            <ul className="relative mt-5 space-y-0 border-l border-indigo-400/40 pl-5">
               {opportunity.signals.map((signal) => (
                 <li key={signal.signal_id} className="relative py-2.5">
                   <span
@@ -155,14 +202,25 @@ export function OpportunityDetailPage() {
           </AiPanel>
 
           {opportunity.recommended_action ? (
-            <AiPanel label="recommended">{opportunity.recommended_action.text}</AiPanel>
+            <AiPanel label="recommended" className="border-l-amber-400">
+              <RecommendedActionBody text={opportunity.recommended_action.text} />
+              {opportunity.recommended_action.evidence_ids.length > 0 ? (
+                <p className="mt-4 text-caption text-on-ai-muted">
+                  Grounded in {opportunity.recommended_action.evidence_ids.length} stored
+                  evidence item
+                  {opportunity.recommended_action.evidence_ids.length === 1 ? '' : 's'} on
+                  this potential opportunity — not a guaranteed deal.
+                </p>
+              ) : null}
+            </AiPanel>
           ) : (
             <section className="rounded-xl border border-dashed border-indigo-200 bg-surface-ai-subtle px-5 py-4">
               <p className="text-label text-indigo-600 uppercase">
-                Recommended research / action
+                Recommended next action
               </p>
               <p className="mt-2 text-body-sm text-secondary">
-                No recommended research or action was produced for this potential opportunity.
+                No evidence-backed next step was produced for this potential opportunity.
+                Open this page again after a scan, or ask the Advisor with opportunity scope.
               </p>
             </section>
           )}

@@ -40,6 +40,14 @@ _OUT_OF_SCOPE_PATTERNS = (
     re.compile(r"\b(canada|uk|united kingdom|europe|india|australia)\b", re.I),
 )
 
+_TOKEN = re.compile(r"[a-z0-9]{3,}")
+# Advisor-only retrieval polish (Persona has its own constants). Gate stays §18 default.
+_RAG_POOL = 12
+_RAG_TOP = 4
+_RAG_MIN_CHUNK_CHARS = 40
+_RAG_KEYWORD_BONUS = 0.05
+_CONTEXT_CHUNK_CHARS = 600
+
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 # Internal ids the model sometimes writes into prose: "(chunk_ids: <uuid>, ...)" or bare uuids.
 _BRACKETED_ID_RE = re.compile(rf"\s*[(\[][^()\[\]]*?{_UUID}[^()\[\]]*?[)\]]")
@@ -156,10 +164,21 @@ async def ask(
         organization_id=organization.organization_id,
         query_embedding=query_vecs[0],
         embedding_model=settings.embedding_model,
-        limit=6,
+        limit=_RAG_POOL,
     )
     gate = settings.embedding_similarity_gate
-    passing = [(chunk, sim) for chunk, sim in hits if sim >= gate]
+    query_tokens = set(_TOKEN.findall(message.lower()))
+    ranked: list[tuple[float, object, float]] = []
+    for chunk, sim in hits:
+        text = (chunk.chunk_text or "").strip()
+        if len(text) < _RAG_MIN_CHUNK_CHARS:
+            continue
+        if sim < gate:
+            continue
+        bonus = _keyword_overlap_bonus(query_tokens, text)
+        ranked.append((float(sim) + bonus, chunk, float(sim)))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    passing = [(chunk, sim) for _, chunk, sim in ranked[:_RAG_TOP]]
     if not passing:
         return await _finish(
             session,
@@ -179,7 +198,7 @@ async def ask(
             "source_name": chunk.source_name,
             "source_url": chunk.source_url,
             "published_on": chunk.published_on.isoformat() if chunk.published_on else "unavailable",
-            "chunk_text": chunk.chunk_text,
+            "chunk_text": (chunk.chunk_text or "")[:_CONTEXT_CHUNK_CHARS],
         }
         for chunk, _ in passing
     ]
@@ -493,6 +512,16 @@ async def _finish(
     )
 
 
+def _keyword_overlap_bonus(query_tokens: set[str], text: str) -> float:
+    if not query_tokens:
+        return 0.0
+    chunk_tokens = set(_TOKEN.findall(text.lower()))
+    if not chunk_tokens:
+        return 0.0
+    overlap = len(query_tokens & chunk_tokens) / len(query_tokens)
+    return min(_RAG_KEYWORD_BONUS, overlap * _RAG_KEYWORD_BONUS)
+
+
 def _strip_internal_ids(text: str) -> str:
     """Remove chunk ids / UUIDs that must never be shown to a user."""
     text = _BRACKETED_ID_RE.sub("", text)
@@ -511,12 +540,17 @@ _LAYER_PREFIX = {
 
 
 def _compose_answer_text(segments: list[AdvisorSegment]) -> str:
-    """One bullet per segment: facts first, then interpretation, then next steps."""
+    """Point-wise bullets: facts first, then interpretation, then next steps. Keeps **bold**."""
     rank = {layer: i for i, layer in enumerate(_LAYER_ORDER)}
     ordered = sorted(segments, key=lambda s: rank.get(s.content_layer, len(rank)))
-    return "\n".join(
-        f"• {_LAYER_PREFIX.get(seg.content_layer, '')}{seg.text}" for seg in ordered
-    )
+    lines: list[str] = []
+    for seg in ordered:
+        prefix = _LAYER_PREFIX.get(seg.content_layer, "")
+        text = seg.text.strip()
+        if not text:
+            continue
+        lines.append(f"• {prefix}{text}")
+    return "\n".join(lines)
 
 
 def _data_origin(passing: list) -> str:

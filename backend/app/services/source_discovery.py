@@ -30,11 +30,6 @@ from app.repositories.scans import ScanRun
 
 logger = logging.getLogger("app.services.source_discovery")
 
-_TRANSIENT_REASONS = frozenset(
-    {"timeout", "http_failure", "robots_unavailable", "host_rate_limited", "http_429", "dns_failure"}
-)
-
-
 @dataclass(frozen=True)
 class ApprovedPage:
     organization_source_id: uuid.UUID
@@ -53,8 +48,14 @@ async def run_organization_discovery(
     scan: ScanRun,
     org: Organization,
 ) -> list[ApprovedPage] | None:
-    """Discover and validate official pages for one organization. Every page is fetched at
-    most once; the fetched HTML travels with the result so collection does not fetch again."""
+    """Resolve official pages for one organization.
+
+    Already-approved URLs for the org are trusted (no re-validation / no LLM rediscovery).
+    Their bodies are still fetched live (unless ``SCAN_REFRESH_HOURS`` reuses them) so
+    extract → score → opportunity stay on current content. New orgs with no approved rows
+    still run full discovery + validation. Each page is fetched at most once; HTML travels
+    with the result so collection does not fetch again.
+    """
     organization_id = org.organization_id
     scan.status = "running"
     scan.stage = "discovering"
@@ -85,10 +86,11 @@ async def run_organization_discovery(
     since = datetime.now(timezone.utc) - timedelta(hours=max(0, settings.scan_refresh_hours))
     fresh_ids = await organization_sources_repo.fresh_source_ids(session, organization_id, since)
     page_cache: dict[str, FetchResult] = {}
+    # End the read transaction so no pooled connection is held during page fetches or the model.
+    await session.commit()
 
-    root_row = existing_by_url.get(root_url)
-    if root_row is not None and root_row.organization_source_id in fresh_ids:
-        # Inside the refresh window: no homepage fetch and no model call.
+    if existing_approved:
+        # Trust the register: skip LLM rediscovery and re-validation of known pages.
         candidates = [
             SourceCandidate(row.url, row.source_title, row.page_category, "previously approved")
             for row in existing_approved
@@ -100,8 +102,8 @@ async def run_organization_discovery(
             fetcher=fetcher,
             org=org,
             official_host=official_host,
-            root_url=root_row.url if root_row is not None else root_url,
-            existing_urls=[row.url for row in existing_approved],
+            root_url=root_url,
+            existing_urls=[],
             page_cache=page_cache,
         )
     candidates = _prioritize(candidates, root_url, settings.scan_max_pages_per_organization)
@@ -111,11 +113,12 @@ async def run_organization_discovery(
     scan.sources = []
     await session.commit()
 
-    def is_fresh(candidate: SourceCandidate) -> bool:
+    def is_body_fresh(candidate: SourceCandidate) -> bool:
+        """Scheduled/reuse window only. Default SCAN_REFRESH_HOURS=0 → always live-fetch."""
         row = existing_by_url.get(_normalize_url(candidate.url))
         return row is not None and row.organization_source_id in fresh_ids
 
-    to_fetch = [candidate for candidate in candidates if not is_fresh(candidate)]
+    to_fetch = [candidate for candidate in candidates if not is_body_fresh(candidate)]
     fetched = await asyncio.gather(
         *[_fetch_cached(fetcher, c.url, official_host, page_cache) for c in to_fetch]
     )
@@ -129,6 +132,7 @@ async def run_organization_discovery(
     for candidate in candidates:
         prior = existing_by_url.get(_normalize_url(candidate.url))
         if candidate.url not in results and prior is not None:
+            # Inside SCAN_REFRESH_HOURS: reuse stored body; collect skips (fetched=None).
             approved.append(
                 ApprovedPage(prior.organization_source_id, prior.url, prior.page_category, prior.source_title, None)
             )
@@ -144,28 +148,60 @@ async def run_organization_discovery(
             if _normalize_url(final_url) in seen_final:
                 continue
             seen_final.add(_normalize_url(final_url))
-            source_id = await _upsert_source(
-                session,
-                organization_id=organization_id,
-                url=final_url,
-                title=candidate.title,
-                page_category=candidate.page_category,
-                status="approved",
-                rejection_reason=None,
-            )
-            approved.append(ApprovedPage(source_id, final_url, candidate.page_category, candidate.title, result))
-            source_rows.append(
-                {"source_name": candidate.title or final_url, "status": "succeeded", "detail": candidate.page_category}
-            )
+            if prior is not None:
+                # Already approved: refresh validation timestamp only; keep register row.
+                await organization_sources_repo.touch_validated(
+                    session, prior.organization_source_id
+                )
+                approved.append(
+                    ApprovedPage(
+                        prior.organization_source_id,
+                        prior.url,
+                        prior.page_category,
+                        prior.source_title,
+                        result,
+                    )
+                )
+                source_rows.append(
+                    {
+                        "source_name": prior.source_title or prior.url,
+                        "status": "succeeded",
+                        "detail": "approved source refreshed",
+                    }
+                )
+            else:
+                source_id = await _upsert_source(
+                    session,
+                    organization_id=organization_id,
+                    url=final_url,
+                    title=candidate.title,
+                    page_category=candidate.page_category,
+                    status="approved",
+                    rejection_reason=None,
+                )
+                approved.append(
+                    ApprovedPage(source_id, final_url, candidate.page_category, candidate.title, result)
+                )
+                source_rows.append(
+                    {
+                        "source_name": candidate.title or final_url,
+                        "status": "succeeded",
+                        "detail": candidate.page_category,
+                    }
+                )
             continue
 
         reason = result.reason or "validation_failed"
         if prior is None and result.final_url:
             prior = existing_by_url.get(_normalize_url(result.final_url))
-        if prior is not None and _is_transient(reason):
-            # A network hiccup does not demote a page that was approved before.
+        if prior is not None:
+            # Never demote an already-approved page on a later scan fetch failure.
             source_rows.append(
-                {"source_name": prior.source_title or prior.url, "status": "failed", "detail": f"{reason}; kept previous approval"}
+                {
+                    "source_name": prior.source_title or prior.url,
+                    "status": "failed",
+                    "detail": f"{reason}; kept previous approval",
+                }
             )
             rejected += 1
             continue
@@ -423,10 +459,6 @@ def _unique_urls(urls: list[str]) -> list[str]:
         seen.add(key)
         out.append(url)
     return out
-
-
-def _is_transient(reason: str) -> bool:
-    return reason in _TRANSIENT_REASONS or reason.startswith("http_5")
 
 
 def _host_ok(url: str, official_host: str) -> bool:

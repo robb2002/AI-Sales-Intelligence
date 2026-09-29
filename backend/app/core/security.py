@@ -1,10 +1,12 @@
 import json
 import logging
+import time
 import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from threading import Lock
 
 import jwt
 from jwt.exceptions import ExpiredSignatureError, PyJWKClientConnectionError, PyJWTError
@@ -24,6 +26,9 @@ logger = logging.getLogger(__name__)
 CLERK_JWKS_URL = "https://api.clerk.com/v1/jwks"
 CLERK_USERS_URL = "https://api.clerk.com/v1/users"
 ROLES: frozenset[str] = frozenset({"SALES_REP", "SALES_MANAGER"})
+# Role/email rarely change during a session. Caching avoids a Clerk HTTP round-trip on every
+# scan-status poll (those polls were dominating request latency at 2–3s each).
+_PROFILE_CACHE_TTL_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,8 @@ class ClerkClient:
             timeout=10,
         )
         self._authorized_parties = frozenset(authorized_parties)
+        self._profile_cache: dict[str, tuple[float, ClerkUserProfile]] = {}
+        self._profile_lock = Lock()
 
     def verify_session_token(self, token: str) -> str:
         """Return the Clerk user id. Blocking: call from a thread."""
@@ -86,6 +93,18 @@ class ClerkClient:
 
     def fetch_user_profile(self, clerk_user_id: str) -> ClerkUserProfile:
         """Load email and publicMetadata.role from Clerk. Blocking: call from a thread."""
+        now = time.monotonic()
+        with self._profile_lock:
+            cached = self._profile_cache.get(clerk_user_id)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+
+        profile = self._fetch_user_profile_uncached(clerk_user_id)
+        with self._profile_lock:
+            self._profile_cache[clerk_user_id] = (now + _PROFILE_CACHE_TTL_SECONDS, profile)
+        return profile
+
+    def _fetch_user_profile_uncached(self, clerk_user_id: str) -> ClerkUserProfile:
         request = urllib.request.Request(
             f"{CLERK_USERS_URL}/{urllib.parse.quote(clerk_user_id, safe='')}",
             headers={
@@ -140,6 +159,19 @@ async def resolve_current_user(
         raise UserWithoutRoleError()
     if not profile.email:
         raise UserWithoutRoleError()
+
+    existing = await users.get_by_clerk_user_id(clerk_user_id)
+    if (
+        existing is not None
+        and existing.email == profile.email
+        and existing.role == profile.role
+    ):
+        return CurrentUser(
+            user_id=existing.user_id,
+            clerk_user_id=existing.clerk_user_id,
+            email=existing.email,
+            role=existing.role,
+        )
 
     user = await users.upsert_from_clerk(clerk_user_id, profile.email, profile.role)
     await session.commit()

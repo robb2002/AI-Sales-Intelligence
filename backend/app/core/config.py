@@ -22,17 +22,19 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-02-15-preview"
 
     # Azure embedding deployment (Advisor RAG). Same resource/key as chat LLM.
-    # Deploy text-embedding-3-small; EMBEDDING_MODEL is that deployment name.
-    embedding_model: str = "text-embedding-3-small"
+    # EMBEDDING_MODEL is the Azure deployment name (text-embedding-ada-002, width 1536).
+    embedding_model: str = "text-embedding-ada-002"
     embedding_dimensions: int = 1536
     embedding_similarity_gate: float = 0.72
     chunk_size_chars: int = 1200
     chunk_overlap_chars: int = 150
+    # Background Advisor index jobs (same process). Does not block Scan Now / Scan All.
+    index_concurrency: int = 1
 
     http_user_agent: str = (
         "ExcelsoftSalesIntelligence/0.1 (+https://example.local; research; contact=dev@example.local)"
     )
-    scan_org_concurrency: int = 2
+    scan_org_concurrency: int = 4
     scan_max_concurrent_sources: int = 4
     scan_max_pages_per_organization: int = 10
     scan_news_articles_per_hub: int = 5
@@ -46,6 +48,10 @@ class Settings(BaseSettings):
     # One shared request per scan. GSA documents `limit` up to 1000; a larger page lets one
     # request cover far more notices for local organization matching (DATA_SOURCES §2.1).
     sam_gov_search_limit: int = 1000
+
+    # USAspending.gov API v2 (DATA_SOURCES.md §3). No API key. Fail-soft historical awards.
+    usaspending_enabled: bool = True
+    usaspending_max_awards_per_org: int = 8
 
     # Google Programmable Search (DATA_SOURCES.md §8). Peer competitors on Update. The cap is an
     # application safeguard, not Google's quota.
@@ -61,6 +67,10 @@ class Settings(BaseSettings):
         "honorlock.com,proctorio.com,meazurelearning.com,caveon.com,questionmark.com"
     )
     persona_max_live_pages_per_domain: int = 3
+
+    # Sales Persona LLM only (does not change Advisor / scan Azure path).
+    persona_gemini_api_key: str = ""
+    persona_gemini_model: str = "gemini-3.8-flash"
 
     # APScheduler daily Scan All (TECHNICAL_PRD). Off unless explicitly enabled.
     scheduler_enabled: bool = False
@@ -104,6 +114,10 @@ class Settings(BaseSettings):
                 and self.llm_model.strip()
             )
         return bool(self.llm_api_key.strip() and self.llm_model.strip())
+
+    @property
+    def persona_gemini_configured(self) -> bool:
+        return bool(self.persona_gemini_api_key.strip() and self.persona_gemini_model.strip())
 
     @property
     def embedding_configured(self) -> bool:

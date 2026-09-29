@@ -5,20 +5,21 @@ import { Badge } from '../../components/ui/Badge'
 import { Card } from '../../components/ui/Card'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { cn } from '../../lib/cn'
-import type { DashboardResponse, DashboardScanState, ScoreBand } from '../../types/api'
+import type { DashboardResponse, ScoreBand } from '../../types/api'
 import { SCORE_BAND_LABELS, formatUpdatedAt } from '../intelligence/labels'
+import { scanStatusChip, scanStatusMetricLabel } from './scanStatusCopy'
 
 const BAND_ORDER: ScoreBand[] = ['high', 'medium', 'low', 'monitor']
 
-const SCAN_STATE: Record<
-  DashboardScanState,
-  { label: string; variant: 'soft-neutral' | 'soft-positive' | 'soft-ai' | 'soft-opportunity' | 'soft-risk' }
+const CHIP_VARIANT: Record<
+  string,
+  'soft-neutral' | 'soft-positive' | 'soft-ai' | 'soft-opportunity' | 'soft-risk'
 > = {
-  never_scanned: { label: 'Never scanned', variant: 'soft-neutral' },
-  current: { label: 'All scans current', variant: 'soft-positive' },
-  running: { label: 'Scan running', variant: 'soft-ai' },
-  partial: { label: 'Partially complete', variant: 'soft-opportunity' },
-  failed: { label: 'Last scan failed', variant: 'soft-risk' },
+  muted: 'soft-neutral',
+  positive: 'soft-positive',
+  ai: 'soft-ai',
+  opportunity: 'soft-opportunity',
+  risk: 'soft-risk',
 }
 
 function MetricCard({
@@ -78,7 +79,7 @@ export function DashboardMetrics({
 }) {
   const cached = data.data_origin === 'cached'
   const { opportunities, signals, competitor_vendor: vendor, scan_status: scan } = data
-  const scanState = SCAN_STATE[scan.state]
+  const scanChip = scanStatusChip(scan)
   const hint = <p className="mt-1 text-caption text-secondary">No data yet</p>
 
   return (
@@ -125,7 +126,9 @@ export function DashboardMetrics({
 
       <MetricCard label="Scan status">
         <div className="mt-2 flex items-center gap-2">
-          <Badge variant={scanState.variant}>{scanState.label}</Badge>
+          <Badge variant={CHIP_VARIANT[scanChip.tone]}>
+            {scanStatusMetricLabel(scan.state, scan.last_status)}
+          </Badge>
         </div>
         <p className="mt-2 text-caption text-secondary">
           {scan.last_finished_at
@@ -134,9 +137,11 @@ export function DashboardMetrics({
               ? 'First scan in progress'
               : 'No completed scan yet'}
         </p>
-        <p className="mt-0.5 text-caption text-secondary">
-          {scan.sources_failed} failed source{scan.sources_failed === 1 ? '' : 's'}
-        </p>
+        {scan.state !== 'current' && (
+          <p className="mt-0.5 text-caption text-secondary">
+            {scan.sources_failed} failed source{scan.sources_failed === 1 ? '' : 's'}
+          </p>
+        )}
         <a
           href="#scanning"
           className="mt-2 inline-block text-caption font-medium text-navy-600 hover:underline focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden"

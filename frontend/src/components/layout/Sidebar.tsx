@@ -1,4 +1,4 @@
-import { Building2, LayoutDashboard, Radar, Radio, Sparkles, Target, type LucideIcon } from 'lucide-react'
+import { Building2, LayoutDashboard, Radar, Radio, Sparkles, Target, TrendingUp, type LucideIcon } from 'lucide-react'
 import { NavLink } from 'react-router'
 import { ROLE_LABELS } from '../../features/auth/roles'
 import { useIdentity } from '../../features/auth/useIdentity'
@@ -22,6 +22,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/organizations', label: 'Organizations', icon: Building2 },
   { to: '/signals', label: 'Signals', icon: Radio },
   { to: '/opportunities', label: 'Opportunities', icon: Target },
+  { to: '/trends', label: 'Trends', icon: TrendingUp },
   { to: '/competitors', label: 'Competitors', icon: Radar },
   { to: '/advisor', label: 'AI Advisor', icon: Sparkles },
 ]

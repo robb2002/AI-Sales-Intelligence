@@ -84,6 +84,15 @@ async def fresh_source_ids(
     return set(rows.scalars().all())
 
 
+async def touch_validated(session: AsyncSession, organization_source_id: uuid.UUID) -> None:
+    """Refresh last_validated_at for an already-approved source after a live fetch."""
+    await session.execute(
+        update(OrganizationSource)
+        .where(OrganizationSource.organization_source_id == organization_source_id)
+        .values(last_validated_at=func.now())
+    )
+
+
 async def set_extraction_status(
     session: AsyncSession, organization_source_ids: list[uuid.UUID], status: str
 ) -> None:

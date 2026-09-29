@@ -24,6 +24,7 @@ from app.core.errors import (
     ValidationAppError,
 )
 from app.ingestion.collectors import google_search
+from app.repositories import competitors as competitors_repo
 from app.repositories import organization_peer_competitors as peers_repo
 from app.repositories import source_requests as source_requests_repo
 from app.repositories.organization_peer_competitors import OrganizationPeerCompetitor
@@ -114,7 +115,9 @@ async def refresh(
         logger.exception("Peer competitor selection failed")
         raise SearchFailedError(message="Names could not be picked from the results.") from None
 
-    ranked = rank_peers(org, outcome.results, proposed)
+    tracked_competitors = await competitors_repo.competitor_organizations(session)
+    blocked = {_normalize(c.name) for c in tracked_competitors if c.name}
+    ranked = rank_peers(org, outcome.results, proposed, blocked_competitor_names=blocked)
     if not ranked:
         raise SearchFailedError(
             message="The search returned no clear peer competitors. The previous list is unchanged."
@@ -143,13 +146,17 @@ def rank_peers(
     org: Organization,
     results: list[google_search.SearchResult],
     proposed: list[dict],
+    *,
+    blocked_competitor_names: set[str] | None = None,
 ) -> list[tuple[str, google_search.SearchResult, str]]:
     """Verified, deduplicated, ranked (name, result, verbatim text). No model text is trusted.
 
     A name is kept only if it appears (case-insensitive) in the title or snippet of the result the
-    model pointed at. It ranks higher the more results mention it, then by earliest result.
+    model pointed at. Tracked EdTech competitor org names are dropped (peers are institutions).
+    It ranks higher the more results mention it, then by earliest result.
     """
     own = _normalize(org.name)
+    blocked = blocked_competitor_names or set()
 
     seen: set[str] = set()
     candidates: list[tuple[str, int, google_search.SearchResult, str]] = []
@@ -160,6 +167,8 @@ def rank_peers(
             continue
         key = _normalize(name)
         if not key or key in seen or key == own or key in own or own in key:
+            continue
+        if _is_blocked_competitor_name(key, blocked):
             continue
         result = results[index - 1]
         text = _verbatim_text(name, result)
@@ -174,6 +183,19 @@ def rank_peers(
 
     candidates.sort(key=lambda c: (-mentions(c[0]), c[1]))
     return [(name, result, text) for name, _index, result, text in candidates[:_TOP_N]]
+
+
+def _is_blocked_competitor_name(normalized_name: str, blocked: set[str]) -> bool:
+    """True when the proposed peer matches a tracked competitor organization name."""
+    if not blocked or not normalized_name:
+        return False
+    if normalized_name in blocked:
+        return True
+    return any(
+        normalized_name == b
+        or (len(b) >= 4 and (b in normalized_name or normalized_name in b))
+        for b in blocked
+    )
 
 
 def _mentions_org(org: Organization, result: google_search.SearchResult) -> bool:

@@ -7,6 +7,9 @@ alembic==1.20.0
 pyjwt[crypto]==2.14.0
 httpx==0.28.1
 beautifulsoup4==4.12.3
+# Sales Persona Gemini adapter only (Advisor/scan stay on Azure OpenAI).
+# 2.x required for Interactions API (legacy 1.x schema rejected by Google).
+google-genai>=2.0.0,<3
 # Optional: preferred text splitter when installable (fallback in app.ingestion.chunking).
 # langchain-text-splitters==0.3.9
 apscheduler==3.11.3

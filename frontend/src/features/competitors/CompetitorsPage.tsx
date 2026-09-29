@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ExternalLink, Radar, Sparkles } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, ExternalLink, Radar, Sparkles, Trash2 } from 'lucide-react'
 import { useId, useState } from 'react'
 import { Link } from 'react-router'
 import { getCompetitors } from '../../api/competitors'
@@ -15,7 +15,10 @@ import { Skeleton } from '../../components/ui/Skeleton'
 import { cn } from '../../lib/cn'
 import { useDocumentTitle } from '../../lib/useDocumentTitle'
 import type { CompetitorItem, CompetitorSignal, CompetitorsResponse } from '../../types/api'
+import { useCurrentUser } from '../auth/useCurrentUser'
+import { DeleteOrganizationModal } from '../organizations/DeleteOrganizationModal'
 import { formatSignalDate, formatUpdatedAt } from '../intelligence/labels'
+import { CompetitorActivityChart } from './CompetitorActivityChart'
 
 const FOCUS =
   'focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:outline-hidden'
@@ -42,7 +45,7 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
   return (
     <Card className="p-5">
       <p className="text-label text-secondary uppercase">{label}</p>
-      <p className="mt-2 text-h1 text-primary">{value}</p>
+      <p className="mt-2 text-metric text-primary">{value}</p>
     </Card>
   )
 }
@@ -97,7 +100,15 @@ function CompetitorSignalRow({ signal }: { signal: CompetitorSignal }) {
   )
 }
 
-function CompetitorCard({ competitor }: { competitor: CompetitorItem }) {
+function CompetitorCard({
+  competitor,
+  isManager,
+  onDelete,
+}: {
+  competitor: CompetitorItem
+  isManager: boolean
+  onDelete: () => void
+}) {
   const website = safeHttpsUrl(competitor.website_url)
   const active = competitor.tracking_status === 'active'
   return (
@@ -105,7 +116,12 @@ function CompetitorCard({ competitor }: { competitor: CompetitorItem }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-h3 text-primary">{competitor.name}</h2>
+            <Link
+              to={`/organizations/${competitor.organization_id}`}
+              className={cn('text-h3 text-primary hover:underline', FOCUS)}
+            >
+              {competitor.name}
+            </Link>
             <Badge variant={active ? 'soft-positive' : 'soft-neutral'}>
               {active ? 'Active' : 'Inactive'}
             </Badge>
@@ -130,10 +146,17 @@ function CompetitorCard({ competitor }: { competitor: CompetitorItem }) {
               : 'Never scanned'}
           </p>
         </div>
-        <p className="text-body-sm text-secondary">
-          <span className="font-semibold text-primary">{competitor.validated_signal_count}</span>{' '}
-          validated signal{competitor.validated_signal_count === 1 ? '' : 's'}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-body-sm text-secondary">
+            <span className="font-semibold text-primary">{competitor.validated_signal_count}</span>{' '}
+            validated signal{competitor.validated_signal_count === 1 ? '' : 's'}
+          </p>
+          {isManager && (
+            <Button variant="danger" size="sm" icon={Trash2} onClick={onDelete}>
+              Delete
+            </Button>
+          )}
+        </div>
       </div>
 
       {competitor.signals.length === 0 ? (
@@ -173,7 +196,15 @@ function CompetitorsSkeleton() {
   )
 }
 
-function CompetitorsContent({ data }: { data: CompetitorsResponse }) {
+function CompetitorsContent({
+  data,
+  isManager,
+  onDelete,
+}: {
+  data: CompetitorsResponse
+  isManager: boolean
+  onDelete: (competitor: CompetitorItem) => void
+}) {
   const { totals } = data
   if (totals.competitors === 0 && data.competitors.length === 0) {
     return (
@@ -194,6 +225,10 @@ function CompetitorsContent({ data }: { data: CompetitorsResponse }) {
       </Card>
     )
   }
+  const ranked = [...data.competitors].sort(
+    (a, b) => b.validated_signal_count - a.validated_signal_count,
+  )
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-3">
@@ -204,9 +239,15 @@ function CompetitorsContent({ data }: { data: CompetitorsResponse }) {
           value={totals.new_in_window}
         />
       </div>
+      <CompetitorActivityChart competitors={ranked} />
       <div className="space-y-4">
-        {data.competitors.map((competitor) => (
-          <CompetitorCard key={competitor.organization_id} competitor={competitor} />
+        {ranked.map((competitor) => (
+          <CompetitorCard
+            key={competitor.organization_id}
+            competitor={competitor}
+            isManager={isManager}
+            onDelete={() => onDelete(competitor)}
+          />
         ))}
       </div>
     </div>
@@ -215,6 +256,10 @@ function CompetitorsContent({ data }: { data: CompetitorsResponse }) {
 
 export function CompetitorsPage() {
   useDocumentTitle('Competitors')
+  const { data: user } = useCurrentUser()
+  const isManager = user?.role === 'SALES_MANAGER'
+  const queryClient = useQueryClient()
+  const [deleteTarget, setDeleteTarget] = useState<CompetitorItem | null>(null)
   const query = useQuery({
     queryKey: ['competitors'],
     queryFn: getCompetitors,
@@ -261,7 +306,30 @@ export function CompetitorsPage() {
         </Card>
       )}
 
-      {query.data && <CompetitorsContent data={query.data} />}
+      {query.data && (
+        <CompetitorsContent
+          data={query.data}
+          isManager={isManager}
+          onDelete={setDeleteTarget}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteOrganizationModal
+          open
+          organizationId={deleteTarget.organization_id}
+          organizationName={deleteTarget.name}
+          marketRole="competitor"
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null)
+            void queryClient.invalidateQueries({ queryKey: ['competitors'] })
+            void queryClient.invalidateQueries({ queryKey: ['organizations'] })
+            void queryClient.invalidateQueries({ queryKey: ['signals'] })
+            void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+          }}
+        />
+      )}
     </div>
   )
 }

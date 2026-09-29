@@ -1,6 +1,7 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
+import { RichText } from "../intelligence/RichText";
 import type {
   PersonaBlock,
   PersonaResponse,
@@ -31,6 +32,13 @@ function LayerTag({ layer }: { layer?: string }) {
     return (
       <span className="mr-2 inline-flex rounded-full border border-indigo-400/50 px-2 py-px align-middle text-label text-indigo-200 uppercase">
         Interpretation
+      </span>
+    );
+  }
+  if (layer === "potential_opportunity") {
+    return (
+      <span className="mr-2 inline-flex rounded-full border border-amber-400/50 px-2 py-px align-middle text-label text-amber-200 uppercase">
+        Potential
       </span>
     );
   }
@@ -134,6 +142,59 @@ function EmailCard({ subject, body }: { subject: string; body: string }) {
   );
 }
 
+function TableBlock({
+  headers,
+  rows,
+  layer,
+  refs,
+  sources,
+  onSelectRef,
+}: {
+  headers: string[];
+  rows: string[][];
+  layer?: string;
+  refs?: number[];
+  sources: PersonaSource[];
+  onSelectRef: (ref: number) => void;
+}) {
+  return (
+    <div className="space-y-2 overflow-x-auto">
+      <div className="flex flex-wrap items-center gap-1">
+        <LayerTag layer={layer} />
+        <RefChips refs={refs} sources={sources} onSelect={onSelectRef} />
+      </div>
+      <table className="w-full min-w-[16rem] border-collapse text-left text-caption text-on-ai">
+        <thead>
+          <tr className="border-b border-indigo-500/40">
+            {headers.map((header, index) => (
+              <th
+                key={index}
+                className="px-2 py-1.5 font-semibold text-indigo-100"
+              >
+                <RichText text={header} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr
+              key={rowIndex}
+              className="border-b border-indigo-500/20 last:border-0"
+            >
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex} className="px-2 py-1.5 align-top">
+                  <RichText text={cell} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Block({
   block,
   sources,
@@ -142,17 +203,19 @@ function Block({
   block: PersonaBlock;
   sources: PersonaSource[];
   onSelectRef: (ref: number) => void;
-}) {
+}): ReactNode {
   switch (block.type) {
     case "heading":
       return (
-        <h4 className="text-body-sm font-semibold text-on-ai">{block.text}</h4>
+                <h4 className="text-body-sm font-semibold text-on-ai">
+          <RichText text={block.text} strongClassName="font-semibold text-on-ai" />
+        </h4>
       );
     case "paragraph":
       return (
         <p className="text-body-sm text-on-ai">
           <LayerTag layer={block.layer} />
-          {block.text}
+          <RichText text={block.text} strongClassName="font-semibold text-on-ai" />
           <RefChips
             refs={block.refs}
             sources={sources}
@@ -166,7 +229,7 @@ function Block({
           {block.items.map((item, index) => (
             <li key={index}>
               <LayerTag layer={item.layer} />
-              {item.text}
+              <RichText text={item.text} strongClassName="font-semibold text-on-ai" />
               <RefChips
                 refs={item.refs}
                 sources={sources}
@@ -175,6 +238,17 @@ function Block({
             </li>
           ))}
         </ul>
+      );
+    case "table":
+      return (
+        <TableBlock
+          headers={block.headers}
+          rows={block.rows}
+          layer={block.layer}
+          refs={block.refs}
+          sources={sources}
+          onSelectRef={onSelectRef}
+        />
       );
     case "email":
       return <EmailCard subject={block.subject} body={block.body} />;
@@ -255,6 +329,9 @@ export function PersonaAnswer({
       {sources.length > 0 && (
         <div className="border-t border-indigo-500/30 pt-3">
           <p className="text-label text-on-ai-muted uppercase">Sources</p>
+          <p className="mt-0.5 text-caption text-on-ai-muted">
+            Tap a number in the answer to highlight the matching source.
+          </p>
           <ol className="mt-2 space-y-1.5">
             {sources.map((source) => {
               const safeUrl =
