@@ -11,10 +11,11 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from typing import Any, Protocol
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.adapters.azure_openai import AzureOpenAIAdapter
 from app.ai.adapters.embeddings import EmbeddingAdapter
 from app.core.config import Settings
 from app.core.errors import ValidationAppError
@@ -42,20 +43,29 @@ logger = logging.getLogger("app.services.persona")
 
 _MAX_FOCUS_ORGS = 3
 _SIGNALS_PER_ORG = 6
-_RAG_CHUNKS_PER_ORG = 4
+_RAG_POOL_PER_ORG = 8
+_RAG_CHUNKS_PER_ORG = 3
+_RAG_MIN_CHUNK_CHARS = 40
 # Stricter than the Advisor gate: the persona mixes several sources, so weak matches are noise.
 _RAG_MIN_SIMILARITY = 0.78
+_RAG_KEYWORD_BONUS = 0.05
+_CONTEXT_CHUNK_CHARS = 350
+_MAX_CONTEXT_CHARS = 10_000
 _MAX_BLOCKS = 8
 _MAX_ITEMS = 12
-_LAYERS = frozenset({"fact", "interpretation", "recommended_action"})
+_MAX_TABLE_COLS = 6
+_MAX_TABLE_ROWS = 8
+_LAYERS = frozenset({"fact", "interpretation", "potential_opportunity", "recommended_action"})
 _WEB_WORDS = re.compile(
     r"\b(latest|news|recent|recently|today|search|look ?up|online|web|what'?s new|announce\w*)\b",
     re.I,
 )
 _COMPETITOR_WORDS = re.compile(r"\b(competitors?|vendors?|rivals?)\b", re.I)
 _EMAIL_REQUEST = re.compile(
-    r"(e-?mails?|draft|outreach|cold (call|email)|follow[- ]?up|reach out|write (to|a|an))", re.I
+    r"\b(e-?mails?|draft|outreach|cold (call|email)|follow[- ]?up|reach out|write (to|a|an))\b",
+    re.I,
 )
+_TOKEN = re.compile(r"[a-z0-9]{3,}")
 _SOURCE_TAG = re.compile(r"\s*\[S?\d+(?:\s*[,;]\s*S?\d+)*\]")
 _UNAVAILABLE_TEXT = (
     "The Sales Persona is temporarily unavailable. Your dashboard, signals and scores are unaffected."
@@ -64,6 +74,19 @@ _EMPTY_TEXT = (
     "I could not build a grounded answer from the stored data. Name a tracked organization, or run "
     "a scan first, and I will draft from the evidence."
 )
+
+
+class _PersonaLlm(Protocol):
+    async def compose_persona_answer(
+        self,
+        *,
+        mode: str,
+        message: str,
+        context_block: str,
+        history_block: str,
+        scope_note: str = "",
+    ) -> dict[str, Any]: ...
+
 
 
 @dataclass
@@ -96,7 +119,7 @@ async def reply(
     session: AsyncSession,
     *,
     settings: Settings,
-    llm: AzureOpenAIAdapter,
+    llm: _PersonaLlm,
     embedder: EmbeddingAdapter,
     message: str,
     history: list[PersonaHistoryTurn],
@@ -137,13 +160,16 @@ async def reply(
 
     await _add_live_lookups(settings, ctx, organizations, focus, message, mode, scoped=scoped)
 
-    if not settings.llm_configured:
+    if not (settings.persona_gemini_configured or settings.llm_configured):
         return _unavailable(ctx)
     try:
+        context_block = ctx.block()
+        if len(context_block) > _MAX_CONTEXT_CHARS:
+            context_block = context_block[:_MAX_CONTEXT_CHARS] + "\n…(context truncated for speed)"
         raw = await llm.compose_persona_answer(
             mode=mode,
             message=message,
-            context_block=ctx.block(),
+            context_block=context_block,
             history_block=_history_block(history),
             scope_note=_scope_note(focus) if scoped else "",
         )
@@ -300,17 +326,26 @@ async def _add_retrieved_chunks(
     if not vectors:
         return
     threshold = max(settings.embedding_similarity_gate, _RAG_MIN_SIMILARITY)
+    query_tokens = set(_TOKEN.findall(message.lower()))
     for org in focus:
         hits = await chunks_repo.retrieve_similar(
             session,
             organization_id=org.organization_id,
             query_embedding=vectors[0],
             embedding_model=settings.embedding_model,
-            limit=_RAG_CHUNKS_PER_ORG,
+            limit=_RAG_POOL_PER_ORG,
         )
+        ranked: list[tuple[float, Any]] = []
         for chunk, similarity in hits:
+            text = (chunk.chunk_text or "").strip()
+            if len(text) < _RAG_MIN_CHUNK_CHARS:
+                continue
             if similarity < threshold:
                 continue
+            bonus = _keyword_overlap_bonus(query_tokens, text)
+            ranked.append((float(similarity) + bonus, chunk))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        for _, chunk in ranked[:_RAG_CHUNKS_PER_ORG]:
             if chunk.data_origin == "cached":
                 ctx.cached = True
             ref = ctx.add_source(
@@ -319,7 +354,20 @@ async def _add_retrieved_chunks(
                 url=chunk.source_url,
                 snippet=chunk.chunk_text,
             )
-            ctx.lines.append(f"[S{ref}] Collected page text ({org.name}): {chunk.chunk_text[:500]}")
+            ctx.lines.append(
+                f"[S{ref}] Collected page text ({org.name}): "
+                f"{chunk.chunk_text[:_CONTEXT_CHUNK_CHARS]}"
+            )
+
+
+def _keyword_overlap_bonus(query_tokens: set[str], text: str) -> float:
+    if not query_tokens:
+        return 0.0
+    chunk_tokens = set(_TOKEN.findall(text.lower()))
+    if not chunk_tokens:
+        return 0.0
+    overlap = len(query_tokens & chunk_tokens) / len(query_tokens)
+    return min(_RAG_KEYWORD_BONUS, overlap * _RAG_KEYWORD_BONUS)
 
 
 async def _add_portfolio_snapshot(session: AsyncSession, ctx: _Context) -> None:
@@ -391,8 +439,13 @@ async def _add_live_lookups(
     allowed = persona_lookup.allowed_hosts(settings, websites)
 
     # Scoped to an organization: only that organization's own site, never competitor domains.
+    # Skip live fetch when we already have stored/RAG sources unless the user clearly asks for
+    # latest web news — live homepage crawls are the main Persona latency cost.
     domains = [] if scoped else _competitor_domains(settings, message, mode)
-    if _WEB_WORDS.search(message) or mode == "research":
+    wants_web = bool(_WEB_WORDS.search(message))
+    if scoped and ctx.sources and not wants_web:
+        return
+    if wants_web:
         domains += [
             host
             for org in focus
@@ -401,8 +454,13 @@ async def _add_live_lookups(
     if not domains:
         return
 
+    # One page per domain when answering quickly from chat; still allowlisted.
     results = await persona_lookup.lookup_domains(
-        settings, domains=domains, allowed=allowed, query=message
+        settings,
+        domains=domains,
+        allowed=allowed,
+        query=message,
+        max_pages_override=1 if scoped else None,
     )
     failures: list[str] = []
     for result in results:
@@ -504,12 +562,42 @@ def _clean_blocks(raw_blocks: list, *, valid_refs: set[int]) -> list[PersonaBloc
             items = _clean_items(raw.get("items"), valid_refs)
             if items:
                 blocks.append(PersonaBlock(type="bullets", items=items))
+        elif kind == "table":
+            headers, rows = _clean_table(raw.get("headers"), raw.get("rows"))
+            layer = _clean_layer(raw.get("layer"), default="interpretation")
+            refs = _clean_refs(raw.get("refs"), valid_refs)
+            if headers and rows and not (layer == "fact" and not refs):
+                blocks.append(
+                    PersonaBlock(
+                        type="table", headers=headers, rows=rows, layer=layer, refs=refs
+                    )
+                )
         elif kind == "email":
             subject = _clean_text(raw.get("subject"))
             body = _clean_email_body(raw.get("body"))
             if subject and body:
                 blocks.append(PersonaBlock(type="email", subject=subject[:200], body=body))
     return blocks
+
+
+def _clean_table(raw_headers, raw_rows) -> tuple[list[str], list[list[str]]]:
+    if not isinstance(raw_headers, list) or not isinstance(raw_rows, list):
+        return [], []
+    headers = [_clean_text(h)[:80] for h in raw_headers[:_MAX_TABLE_COLS]]
+    headers = [h for h in headers if h]
+    if not headers:
+        return [], []
+    width = len(headers)
+    rows: list[list[str]] = []
+    for raw in raw_rows[:_MAX_TABLE_ROWS]:
+        if not isinstance(raw, list):
+            continue
+        cells = [_clean_text(c)[:120] for c in raw[:width]]
+        while len(cells) < width:
+            cells.append("")
+        if any(cells):
+            rows.append(cells)
+    return headers, rows
 
 
 def _clean_items(raw_items, valid_refs: set[int]) -> list[PersonaBulletItem]:
@@ -578,6 +666,11 @@ def _flatten(blocks: list[PersonaBlock]) -> str:
             lines.append(block.text or "")
         elif block.type == "bullets":
             lines += [f"• {item.text}" for item in block.items]
+        elif block.type == "table":
+            if block.headers:
+                lines.append(" | ".join(block.headers))
+            for row in block.rows:
+                lines.append(" | ".join(row))
         elif block.type == "email":
             lines.append(f"Subject: {block.subject}\n\n{block.body}")
     return "\n".join(line for line in lines if line)

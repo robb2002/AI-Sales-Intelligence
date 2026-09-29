@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, SendHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { SendHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -650,7 +650,7 @@ export function SalesPersonaWidget() {
         {open ? (
           <X aria-hidden className="size-6" strokeWidth={1.75} />
         ) : (
-          <Bot aria-hidden className="size-6" strokeWidth={1.75} />
+          <Sparkles aria-hidden className="size-6" strokeWidth={1.75} />
         )}
       </button>
     </>

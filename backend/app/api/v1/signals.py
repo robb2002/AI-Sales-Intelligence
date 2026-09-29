@@ -10,7 +10,7 @@ from app.core.security import CurrentUser
 from app.repositories import evidence as evidence_repo
 from app.repositories import opportunities as opportunities_repo
 from app.repositories import signals as signals_repo
-from app.repositories.organizations import Organization
+from app.repositories.organizations import MARKET_ROLES, ORGANIZATION_TYPES, Organization
 from app.repositories.signals import SIGNAL_STATES, SIGNAL_TYPES, Signal
 from app.repositories.sources import Source
 from app.schemas.signals import (
@@ -20,6 +20,7 @@ from app.schemas.signals import (
     SignalPage,
     SignalSummary,
 )
+from datetime import date
 
 router = APIRouter(tags=["signals"])
 
@@ -31,6 +32,11 @@ async def list_signals(
     organization_id: Annotated[UUID | None, Query()] = None,
     signal_type: Annotated[list[str] | None, Query()] = None,
     state: Annotated[list[str] | None, Query()] = None,
+    state_code: Annotated[list[str] | None, Query()] = None,
+    organization_type: Annotated[list[str] | None, Query()] = None,
+    market_role: Annotated[list[str] | None, Query()] = None,
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -43,6 +49,12 @@ async def list_signals(
         bad_s = [s for s in state if s not in SIGNAL_STATES]
         if bad_s:
             raise ValidationAppError(message=f"Invalid state: {bad_s[0]}")
+    if market_role and any(value not in MARKET_ROLES for value in market_role):
+        raise ValidationAppError(details={"market_role": "invalid"})
+    if organization_type and any(value not in ORGANIZATION_TYPES for value in organization_type):
+        raise ValidationAppError(details={"organization_type": "invalid"})
+    if date_from is not None and date_to is not None and date_to < date_from:
+        raise ValidationAppError(details={"date_to": "before_date_from"})
 
     rows, total = await signals_repo.list_signals(
         session,
@@ -52,6 +64,11 @@ async def list_signals(
         q=q,
         limit=limit,
         offset=offset,
+        market_roles=market_role,
+        state_codes=state_code,
+        organization_types=organization_type,
+        date_from=date_from,
+        date_to=date_to,
     )
     counts = await evidence_repo.count_for_signals(
         session, [row.signal_id for row in rows]

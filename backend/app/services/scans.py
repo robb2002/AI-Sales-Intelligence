@@ -18,14 +18,14 @@ from app.repositories import organization_sources as organization_sources_repo
 from app.repositories.organizations import Organization
 from app.repositories.scans import ScanBatch, ScanRun
 from app.services import sam_collection
+from app.services import usaspending_collection
 from app.services.document_collection import collect_organization_documents
-from app.services.document_indexing import index_documents
+from app.services.indexing_worker import schedule_document_indexing
 from app.services.opportunity_correlation import correlate_organization_opportunity
 from app.services.sam_collection import SamBatchOutcome
 from app.services.signal_dedup import dedupe_organization_signals
 from app.services.signal_extraction import extract_organization_signals
 from app.services.source_discovery import list_active_organizations, run_organization_discovery
-from app.ai.adapters.embeddings import get_embedding_adapter
 
 logger = logging.getLogger("app.services.scans")
 
@@ -276,6 +276,7 @@ async def _run_organization(
         org = await session.get(Organization, scan.organization_id)
         if org is None:
             return
+        organization_id = org.organization_id
         try:
             pages = await run_organization_discovery(
                 session, settings=settings, llm=llm, fetcher=fetcher, scan=scan, org=org
@@ -291,12 +292,36 @@ async def _run_organization(
             await session.commit()
 
             if pages is None:
-                # Discovery already marked the run failed; keep SAM rows and soften to partial
-                # when SAM matched notices for this organization.
-                if sam_outcome.by_organization.get(org.organization_id):
+                # Discovery already marked the run failed; keep SAM / USAspending rows and soften
+                # to partial when any non-website source stored documents for this organization.
+                usa_changed_ids = await usaspending_collection.collect_usaspending_for_organization(
+                    session, settings=settings, scan=scan, org=org
+                )
+                await session.commit()
+                stored_ids = list(dict.fromkeys([*sam_changed_ids, *usa_changed_ids]))
+                if stored_ids or sam_outcome.by_organization.get(org.organization_id):
+                    if stored_ids:
+                        schedule_document_indexing(
+                            session_factory=session_factory,
+                            settings=settings,
+                            organization_id=org.organization_id,
+                            document_ids=stored_ids,
+                        )
+                        try:
+                            await extract_organization_signals(
+                                session,
+                                llm=llm,
+                                scan=scan,
+                                org=org,
+                                document_ids=stored_ids,
+                            )
+                            await session.commit()
+                        except Exception:
+                            logger.exception("Signal extraction failed after website discovery miss")
+                            await session.commit()
                     scan.status = "partial"
                     scan.error_detail = (
-                        "Website discovery failed; SAM.gov notices were still stored"
+                        "Website discovery failed; SAM.gov / USAspending data were still stored"
                     )
                     scan.stage = None
                     if scan.finished_at is None:
@@ -308,37 +333,24 @@ async def _run_organization(
                 session, settings=settings, fetcher=fetcher, scan=scan, org=org, pages=pages
             )
 
-            # Only new/changed document bodies go to the LLM (unchanged hashes are skipped).
-            extract_ids = list(dict.fromkeys([*sam_changed_ids, *website.changed_document_ids]))
+            usa_changed_ids = await usaspending_collection.collect_usaspending_for_organization(
+                session, settings=settings, scan=scan, org=org
+            )
 
-            try:
-                embedder = get_embedding_adapter(settings)
-                indexed = await index_documents(
-                    session,
-                    settings=settings,
-                    embedder=embedder,
-                    organization=org,
-                    document_ids=extract_ids,
+            # Only new/changed document bodies go to the LLM (unchanged hashes are skipped).
+            extract_ids = list(
+                dict.fromkeys(
+                    [*sam_changed_ids, *website.changed_document_ids, *usa_changed_ids]
                 )
-                if indexed:
-                    scan.sources = list(scan.sources or []) + [
-                        {
-                            "source_name": "Advisor index",
-                            "status": "succeeded",
-                            "detail": f"{indexed} chunks embedded",
-                        }
-                    ]
-                await session.commit()
-            except Exception:
-                logger.exception("Document indexing failed")
-                scan.sources = list(scan.sources or []) + [
-                    {
-                        "source_name": "Advisor index",
-                        "status": "failed",
-                        "detail": "unexpected_error",
-                    }
-                ]
-                await session.commit()
+            )
+
+            # Chunk/embed runs in the background so Scan Now / Scan All are not blocked.
+            schedule_document_indexing(
+                session_factory=session_factory,
+                settings=settings,
+                organization_id=org.organization_id,
+                document_ids=extract_ids,
+            )
 
             try:
                 await extract_organization_signals(
@@ -449,15 +461,24 @@ async def _run_organization(
             scan.finished_at = datetime.now(timezone.utc)
             await session.commit()
         except Exception:
+            # DB drops mid-scan leave status=running / stage=discovering; always finish the
+            # row on a fresh session so the UI stops polling a dead worker.
             logger.exception("Organization scan failed")
-            await session.rollback()
-            await organization_sources_repo.reset_interrupted_extractions(
-                session, organization_id=org.organization_id
-            )
-            scan = await session.get(ScanRun, scan_id)
-            if scan is not None:
-                scan.status = "failed"
-                scan.stage = None
-                scan.error_detail = "Scan stopped by an unexpected error"
-                scan.finished_at = datetime.now(timezone.utc)
-                await session.commit()
+            try:
+                await session.rollback()
+            except Exception:
+                logger.exception("Rollback after scan failure also failed")
+            try:
+                async with session_factory() as fail_session:
+                    await organization_sources_repo.reset_interrupted_extractions(
+                        fail_session, organization_id=organization_id
+                    )
+                    failed = await fail_session.get(ScanRun, scan_id)
+                    if failed is not None and failed.status in ("queued", "running"):
+                        failed.status = "failed"
+                        failed.stage = None
+                        failed.error_detail = "Scan stopped by an unexpected error"
+                        failed.finished_at = datetime.now(timezone.utc)
+                        await fail_session.commit()
+            except Exception:
+                logger.exception("Could not mark scan failed after unexpected error")

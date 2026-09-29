@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Data Collection
 
-Call only sources and endpoints in `docs/DATA_SOURCES.md`. SAM.gov Get Opportunities v2, the four listed USAspending v2 routes, IPEDS files, and website URLs that already have a row in §5.3.
+Call only sources and endpoints in `docs/DATA_SOURCES.md`. SAM.gov Get Opportunities v2, the four listed USAspending v2 routes, IPEDS files, and website URLs that already have a row in §5.3 or, during the interim, an approved `organization_sources` row plus the bounded news-article links from §5.2b. Every website request goes through `app/ingestion/fetcher.py`.
 
 Do not add a third-party API. Do not guess a SAM.gov or USAspending deep link while it is `NEEDS VERIFICATION`. Do not put `SAM_GOV_API_KEY` in a stored evidence URL.
 

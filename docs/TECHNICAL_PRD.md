@@ -331,10 +331,12 @@ receives write access to the database independent of a service.
 Embeddings are accessed through the embedding adapter so the deployment can change without touching
 callers.
 
-> **Decided 2026-09-25 (updated).** Hosted Azure OpenAI embeddings on the same resource/key as
-> chat. Model: `text-embedding-3-small` (deployment name in `EMBEDDING_MODEL`), vector width
-> **1536**. Chat stays `interns-gpt-4.1`. Local/Groq embedding paths were removed from the default
-> product path. Switching width requires a migration and a full re-index.
+> **Decided 2026-09-27 (updated).** Hosted Azure OpenAI embeddings on the same resource/key as
+> chat. Model: `text-embedding-ada-002` (deployment name in `EMBEDDING_MODEL`), vector width
+> **1536**. Chat stays `interns-gpt-4.1`. Chunking/embedding runs as an in-process background job
+> after documents are stored and does not block Scan Now / Scan All. Local/Groq embedding paths
+> were removed from the default product path. Switching width requires a migration and a full
+> re-index.
 
 ### 5.5 LangChain, used narrowly
 
@@ -480,6 +482,7 @@ new collector (`FR-DATA-02`, `FR-DATA-04`).
 | 2 | Public data file / feed | IPEDS reference data (`FR-DATA-07`: enrichment only) |
 | 3 | Requests + BeautifulSoup | Static pages on approved official organization websites |
 | 3a | `httpx` (async) | Async outbound HTTP for URL validation, website page fetch, and the Azure OpenAI adapter (AD-07). It is the async stand-in for Requests inside the FastAPI process. BeautifulSoup still does all HTML parsing. No browser-impersonation client and no second extraction library |
+| 3b | `google-genai` | Sales Persona Gemini adapter only (`PERSONA_GEMINI_*`). Advisor, scan extraction, and embeddings stay on Azure OpenAI |
 | 4 | Playwright | Only where a page genuinely requires JavaScript rendering |
 
 Playwright is a last resort because it multiplies the deployment footprint (a browser binary in
@@ -688,9 +691,11 @@ Names and purposes only; values are never recorded in this repository.
 | `LLM_PROVIDER` | Backend | Selects the adapter (AD-07). MVP discovery uses `azure_openai` when configured |
 | `LLM_MODEL` | Backend | Model or Azure deployment name for the selected provider |
 | `LLM_API_KEY` | Backend | Provider credential (Azure OpenAI key when `LLM_PROVIDER=azure_openai`) |
-| `LLM_TIMEOUT_SECONDS` | Backend | Bound on model calls |
+| `LLM_TIMEOUT_SECONDS` | Backend | Bound on model calls. A call that fails with 429 or 5xx, or cannot connect, is retried up to 2 more times, honoring `Retry-After`. A read timeout is not retried |
 | `AZURE_OPENAI_ENDPOINT` | Backend | Azure OpenAI resource endpoint when using `azure_openai` |
 | `AZURE_OPENAI_API_VERSION` | Backend | Azure OpenAI API version string |
+| `PERSONA_GEMINI_API_KEY` | Backend | Optional. When set, Sales Persona replies use Gemini; Advisor/scan stay on Azure |
+| `PERSONA_GEMINI_MODEL` | Backend | Persona Gemini model id (default `gemini-3.8-flash`) |
 | `EMBEDDING_MODEL` | Backend | Open-source embedding model identifier |
 | `EMBEDDING_API_URL` | Backend | Only if hosted embeddings are chosen (§5.4) |
 | `SAM_GOV_API_KEY` | Backend | SAM.gov data service credential |
@@ -699,10 +704,9 @@ Names and purposes only; values are never recorded in this repository.
 | `SAM_GOV_SEARCH_LIMIT` | Backend | Max notices per search page (default 25, max 1000) |
 | `SCAN_SCHEDULE_CRON` | Backend | Scheduled sweep cadence (§9) |
 | `SCAN_MAX_CONCURRENT_SOURCES` | Backend | Politeness bound (§7.4). Max website requests in flight at once, across hosts |
-| `SCAN_ORG_CONCURRENCY` | Backend | Max concurrent organization discovery runs inside one Scan All batch |
-| `SCAN_MAX_PAGES_PER_ORGANIZATION` | Backend | Cap on approved pages validated and collected per organization per scan (default 10) |
+| `SCAN_ORG_CONCURRENCY` | Backend | Max concurrent organization scans inside one Scan All batch (default 4). Each organization is a different host, so the per-host politeness gap is unchanged. Scans release database connections while waiting on sites or the model, because the Supabase session pooler allows 15 clients per project || `SCAN_MAX_PAGES_PER_ORGANIZATION` | Backend | Cap on approved pages validated and collected per organization per scan (default 10) |
 | `SCAN_NEWS_ARTICLES_PER_HUB` | Backend | Articles collected from an organization's own news hub per scan (default 5, `DATA_SOURCES.md` §5.2b) |
-| `SCAN_REFRESH_HOURS` | Backend | A page collected within this window is reused, not fetched again. Default 0: every Scan Now fetches live. Scheduled scans use 24 |
+| `SCAN_REFRESH_HOURS` | Backend | A page collected within this window is reused, not fetched again. Default 0: every Scan Now fetches live. Scheduled scans use 24. Already-approved `organization_sources` skip LLM rediscovery and re-validation; live fetch still applies when this is 0 |
 | `HTTP_TIMEOUT_SECONDS` | Backend | Read timeout for website requests (default 15; connect timeout 10) |
 | `HTTP_USER_AGENT` | Backend | Honest client identification (§8.3) |
 | `ENABLE_FALLBACK_DATASET` | Backend | Whether cached fallback may be read (§7.6) |
@@ -1157,7 +1161,7 @@ should be settled before implementation begins. Sequencing is owned by `IMPLEMEN
 
 | # | Question | Section | Blocks | Recommendation |
 |---|---|---|---|---|
-| T1 | Embedding model deployment: in-process or hosted API? | §5.4 | — | **Decided 2026-09-25.** Hosted Azure OpenAI `text-embedding-3-small`, width 1536; chat `interns-gpt-4.1` |
+| T1 | Embedding model deployment: in-process or hosted API? | §5.4 | — | **Decided 2026-09-27.** Hosted Azure OpenAI `text-embedding-ada-002`, width 1536; chat `interns-gpt-4.1`; index in-process background, not on scan path |
 | T2 | Backend and frontend hosting targets | §27 | Deployment | Must be a backend host that does not idle to zero |
 | T3 | ~~Supabase Auth or FastAPI-native?~~ | §10 | — | **Decided:** Clerk authenticates; FastAPI authorizes (AD-15) |
 | T4 | LLM provider selection | §5.1 | — | **Decided 2026-09-23.** Provider stays pending. Business logic uses the LLM adapter only |

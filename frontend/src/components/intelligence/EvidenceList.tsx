@@ -33,6 +33,12 @@ export function EvidenceItemCard({ item }: { item: EvidenceItemType }) {
           </a>
         </div>
       </div>
+      {item.relationship ? (
+        <p className="mt-3 rounded-md bg-surface-ai-subtle px-3 py-2 text-body-sm text-primary">
+          <span className="font-medium text-indigo-700">Why it matters: </span>
+          {item.relationship}
+        </p>
+      ) : null}
       <blockquote
         className={cn(
           'mt-3 border-l-2 border-navy-200 bg-surface-sunken px-3 py-2 text-body-sm text-neutral-700',
@@ -49,9 +55,6 @@ export function EvidenceItemCard({ item }: { item: EvidenceItemType }) {
           {expanded ? 'Show less' : 'Show more'}
         </button>
       )}
-      <p className="mt-3 text-caption text-secondary">
-        <span className="font-medium">Supports:</span> {item.relationship}
-      </p>
     </article>
   )
 }

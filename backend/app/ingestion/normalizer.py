@@ -10,6 +10,10 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 
 _MIN_BODY_CHARS = 40
+# Landmark (<main>/<article>) must clear this, or hold a large share of the page,
+# before it beats <body>. Stops related-content cards from becoming the root.
+_LANDMARK_MIN_CHARS = 200
+_LANDMARK_BODY_SHARE = 0.35
 _MAX_BODY_CHARS = 60_000
 _BLOCK_TAGS = ("h1", "h2", "h3", "h4", "p", "li", "blockquote", "dd", "td")
 _NOISE_TAGS = (
@@ -59,7 +63,9 @@ def normalize_html(html: str, base_url: str, *, allow_time_tag: bool = False) ->
 
     for tag in soup(list(_NOISE_TAGS)):
         tag.decompose()
-    root = soup.find("article") or soup.find("main") or soup.body or soup
+    # Prefer the largest substantial main/article. The first <article> is often a
+    # related-content card (e.g. Caveon loop items) and must not win over real body text.
+    root = _content_root(soup)
     content_links = _absolute_links(root, base_url)
 
     blocks: list[str] = []
@@ -81,6 +87,42 @@ def normalize_html(html: str, base_url: str, *, allow_time_tag: bool = False) ->
     if len(body) < _MIN_BODY_CHARS:
         return NormalizedPage(title, "", "", published_on, links, content_links)
     return NormalizedPage(title, body, content_hash(body), published_on, links, content_links)
+
+
+def _text_len(node) -> int:
+    return len(re.sub(r"\s+", " ", node.get_text(" ", strip=True)))
+
+
+def _content_root(soup: BeautifulSoup):
+    """Pick the best content container after noise tags are removed.
+
+    Prefer ``main`` or a substantial ``article`` only when it holds enough text
+    relative to the page. Tiny related-content cards must not beat ``body``.
+    """
+    body = soup.body or soup
+    body_len = _text_len(body)
+
+    candidates: list = []
+    main = soup.find("main")
+    if main is not None:
+        candidates.append(main)
+    candidates.extend(soup.find_all("article"))
+
+    best = None
+    best_len = 0
+    for node in candidates:
+        text_len = _text_len(node)
+        if text_len > best_len:
+            best = node
+            best_len = text_len
+
+    if best is None or best_len < _MIN_BODY_CHARS:
+        return body
+
+    landmark_floor = max(_LANDMARK_MIN_CHARS, int(body_len * _LANDMARK_BODY_SHARE))
+    if best_len >= landmark_floor:
+        return best
+    return body
 
 
 def _text_lines(root) -> str:

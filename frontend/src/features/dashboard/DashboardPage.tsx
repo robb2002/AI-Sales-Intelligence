@@ -31,6 +31,9 @@ import type {
 } from '../../types/api'
 import { useCurrentUser } from '../auth/useCurrentUser'
 import { DashboardMetrics, DashboardMetricsSkeleton } from './DashboardMetrics'
+import { splitInsightProse } from '../intelligence/readableProse'
+import { ScoreBandChart } from './ScoreBandChart'
+import { SignalTypeDistributionChart } from './SignalTypeDistributionChart'
 import { SignalVolumeChart } from './SignalVolumeChart'
 
 const DISCOVERY_STAGES = [
@@ -41,6 +44,28 @@ const DISCOVERY_STAGES = [
 ] as const
 
 const DASHBOARD_STALE_MS = 60_000
+const BATCH_POLL_MS = 5_000
+const SOURCES_POLL_MS = 8_000
+const SOURCES_FETCH_CONCURRENCY = 2
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  async function run(): Promise<void> {
+    while (next < items.length) {
+      const index = next
+      next += 1
+      results[index] = await worker(items[index])
+    }
+  }
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, () => run())
+  await Promise.all(runners)
+  return results
+}
 
 function stageIndex(stage: string | null | undefined, status: string): number {
   if (status === 'succeeded' || status === 'partial' || status === 'failed' || status === 'interrupted') {
@@ -62,6 +87,7 @@ export function DashboardPage() {
   const [batch, setBatch] = useState<ScanBatchResponse | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  const [scanningOpen, setScanningOpen] = useState(false)
 
   const dashboardQuery = useQuery({
     queryKey: ['dashboard'],
@@ -107,32 +133,54 @@ export function DashboardPage() {
     wasRunning.current = batchRunning
   }, [batchRunning, queryClient])
 
+  // Non-overlapping batch poll: wait for the previous GET to finish, then wait 5s.
   useEffect(() => {
     if (!batchRunning || !batch) return
-    const timer = window.setInterval(() => {
-      void getScanBatch(batch.batch_id)
-        .then(setBatch)
-        .catch(() => undefined)
-    }, 2000)
-    return () => window.clearInterval(timer)
-  }, [batch, batchRunning])
+    let cancelled = false
+    const batchId = batch.batch_id
+
+    async function poll(): Promise<void> {
+      while (!cancelled) {
+        try {
+          const next = await getScanBatch(batchId)
+          if (!cancelled) setBatch(next)
+          const stillRunning =
+            next.status === 'running' ||
+            next.scans.some((s) => s.status === 'queued' || s.status === 'running')
+          if (!stillRunning) break
+        } catch {
+          // Keep polling; a single failed poll must not kill progress updates.
+        }
+        if (cancelled) break
+        await new Promise((resolve) => window.setTimeout(resolve, BATCH_POLL_MS))
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+    }
+  }, [batch?.batch_id, batchRunning])
+
+  useEffect(() => {
+    if (batchRunning || starting) setScanningOpen(true)
+  }, [batchRunning, starting])
 
   const activeOrgIds = (orgsQuery.data?.data ?? []).map((o) => o.organization_id).join(',')
 
   const sourcesQuery = useQuery({
     queryKey: ['organization-sources', 'dashboard', activeOrgIds],
-    enabled: Boolean(orgsQuery.data?.data.length),
+    // Only hit /sources when the Scanning panel is open — avoids starving the scan DB pool.
+    enabled: scanningOpen && Boolean(orgsQuery.data?.data.length),
     staleTime: DASHBOARD_STALE_MS,
     queryFn: async () => {
-      const rows = await Promise.all(
-        (orgsQuery.data?.data ?? []).map(async (org) => {
-          const page = await listOrganizationSources(org.organization_id, { status: ['approved'] })
-          return { organization: org, sources: page.data }
-        }),
-      )
-      return rows
+      const orgs = orgsQuery.data?.data ?? []
+      return mapPool(orgs, SOURCES_FETCH_CONCURRENCY, async (org) => {
+        const page = await listOrganizationSources(org.organization_id, { status: ['approved'] })
+        return { organization: org, sources: page.data }
+      })
     },
-    refetchInterval: batchRunning ? 3000 : false,
+    refetchInterval: scanningOpen && batchRunning ? SOURCES_POLL_MS : false,
   })
 
   async function onScanNow() {
@@ -165,6 +213,33 @@ export function DashboardPage() {
         </Alert>
       )}
 
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-label text-secondary uppercase tracking-wide">Portfolio overview</p>
+          <p className="mt-1 max-w-[68ch] text-body-sm text-secondary">
+            Situational awareness across opportunities, signals, competitor activity, and scans —
+            then prioritized accounts to research next.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            icon={RefreshCw}
+            loading={starting || batchRunning}
+            onClick={() => void onScanNow()}
+            disabled={orgsPending || activeOrgs.length === 0}
+          >
+            {batchRunning ? 'Scan in progress' : 'Scan All'}
+          </Button>
+          <a
+            href="#scanning"
+            className="text-body-sm font-medium text-navy-600 hover:underline focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden"
+          >
+            Scan details
+          </a>
+        </div>
+      </div>
+
       {dashboardQuery.isPending && <DashboardMetricsSkeleton />}
 
       {dashboardQuery.isError && (
@@ -185,11 +260,31 @@ export function DashboardPage() {
 
       {dashboardQuery.data && <DashboardOverview data={dashboardQuery.data} />}
 
-      <section id="scanning" aria-labelledby="scanning-heading" className="scroll-mt-6 space-y-6">
-        <h2 id="scanning-heading" className="text-h2 text-primary">
-          Scanning
-        </h2>
+      {scanError && <Alert variant="error" title="Scan failed to start">{scanError}</Alert>}
 
+      <details
+        id="scanning"
+        className="scroll-mt-6 group rounded-lg border border-default bg-surface open:shadow-sm"
+        open={scanningOpen}
+        onToggle={(event) => setScanningOpen(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer list-none px-5 py-4 marker:content-none [&::-webkit-details-marker]:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 id="scanning-heading" className="text-h2 text-primary">
+                Scanning
+              </h2>
+              <p className="mt-1 text-body-sm text-secondary">
+                Source discovery, approved pages, and per-organization scan progress.
+              </p>
+            </div>
+            <Badge variant={batchRunning ? 'soft-ai' : 'soft-neutral'}>
+              {batchRunning ? 'In progress' : 'Operations'}
+            </Badge>
+          </div>
+        </summary>
+
+        <div className="space-y-6 border-t border-default px-5 py-5">
       <Card className="relative space-y-4 overflow-hidden">
         {(orgsQuery.isFetching || latestScanQuery.isFetching) && !orgsPending && (
           <div className="absolute inset-x-0 top-0 h-0.5 bg-indigo-500" aria-hidden />
@@ -198,7 +293,7 @@ export function DashboardPage() {
           <div>
             <h3 className="text-h3 text-primary">Source discovery</h3>
             <p className="mt-1 max-w-[68ch] text-body text-secondary">
-              Scan Now runs for every active organization. It collects official pages and news,
+              Scan All runs for every active organization. It collects official pages and news,
               then refreshes signals and opportunities so you can review what changed.
             </p>
           </div>
@@ -210,7 +305,7 @@ export function DashboardPage() {
               onClick={() => void onScanNow()}
               disabled={orgsPending || activeOrgs.length === 0}
             >
-              {batchRunning ? 'Scan in progress' : 'Scan Now'}
+              {batchRunning ? 'Scan in progress' : 'Scan All'}
             </Button>
             {orgsPending ? (
               <Skeleton className="h-4 w-44" />
@@ -228,13 +323,11 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {scanError && <Alert variant="error" title="Scan failed to start">{scanError}</Alert>}
-
         {!orgsPending && activeOrgs.length === 0 && (
           <EmptyState
             icon={RefreshCw}
             title="No active organizations"
-            description="Activate at least one organization, then run Scan Now to check signals and opportunities."
+            description="Activate at least one organization, then run Scan All to check signals and opportunities."
           />
         )}
 
@@ -270,7 +363,7 @@ export function DashboardPage() {
             <EmptyState
               icon={RefreshCw}
               title="No approved sources yet"
-              description="Run Scan Now to discover and validate official website pages."
+              description="Run Scan All to discover and validate official website pages."
             />
           )}
 
@@ -278,7 +371,8 @@ export function DashboardPage() {
           <p className="text-body-sm text-muted">Approved sources appear after you activate organizations and scan.</p>
         )}
       </Card>
-      </section>
+        </div>
+      </details>
     </div>
   )
 }
@@ -300,7 +394,7 @@ function DashboardOverview({ data }: { data: DashboardResponse }) {
           <EmptyState
             icon={RefreshCw}
             title="No intelligence collected yet"
-            description="There are no validated signals or potential opportunities yet. Run Scan All in the Scanning section below to collect public information for your active organizations."
+            description="There are no validated signals or potential opportunities yet. Run Scan All to collect public information for your active organizations."
             action={
               <a
                 href="#scanning"
@@ -340,6 +434,17 @@ function DashboardOverview({ data }: { data: DashboardResponse }) {
               )}
             </section>
 
+            <section
+              aria-labelledby="distribution-heading"
+              className="grid gap-4 lg:grid-cols-2"
+            >
+              <h2 id="distribution-heading" className="sr-only">
+                Portfolio distributions
+              </h2>
+              <SignalTypeDistributionChart byType={data.signals.by_type} />
+              <ScoreBandChart byBand={data.opportunities.by_band} />
+            </section>
+
             <section aria-labelledby="activity-heading" className="space-y-4">
               <div className="flex items-center justify-between gap-4">
                 <h2 id="activity-heading" className="text-h2 text-primary">
@@ -365,11 +470,10 @@ function DashboardOverview({ data }: { data: DashboardResponse }) {
             </section>
           </div>
 
-          {data.ai_insights.length > 0 && (
-            <aside aria-label="AI insights" className="xl:col-span-1">
-              <AiInsights insights={data.ai_insights} />
-            </aside>
-          )}
+          <aside aria-label="AI insights" className="space-y-4 xl:col-span-1">
+            <h2 className="text-h2 text-primary">AI insights</h2>
+            <AiInsights insights={data.ai_insights} />
+          </aside>
         </div>
       )}
     </div>
@@ -377,27 +481,60 @@ function DashboardOverview({ data }: { data: DashboardResponse }) {
 }
 
 function AiInsights({ insights }: { insights: DashboardInsight[] }) {
+  if (insights.length === 0) {
+    return (
+      <AiPanel label="interpretation" className="p-5!">
+        <p className="text-body text-on-ai">
+          Insufficient evidence for portfolio insights right now.
+        </p>
+        <p className="mt-2 text-body-sm text-on-ai-muted">
+          Insights appear when validated signals and opportunities have enough stored evidence.
+          Run Scan All, then review opportunities and ask the Advisor about a specific account.
+        </p>
+      </AiPanel>
+    )
+  }
+
   return (
     <AiPanel label="interpretation" className="p-5!">
-      <div className="space-y-5">
-        {insights.map((insight, index) => (
-          <div key={index} className="space-y-3">
-            <p className="flex gap-2 text-body">
-              <Sparkles aria-hidden className="mt-0.5 size-4 shrink-0 text-indigo-400" strokeWidth={1.75} />
-              <span>{insight.text}</span>
-            </p>
-            {insight.evidence.length > 0 && (
-              <details className="rounded-lg bg-surface p-3 text-primary">
-                <summary className="cursor-pointer text-body-sm font-medium text-navy-600 focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden">
-                  View {insight.evidence.length} source{insight.evidence.length === 1 ? '' : 's'}
-                </summary>
-                <div className="mt-3">
-                  <EvidenceList items={insight.evidence} heading="SOURCES" />
+      <div className="space-y-6">
+        {insights.map((insight, index) => {
+          const { lead, bullets } = splitInsightProse(insight.text)
+          return (
+            <div
+              key={index}
+              className={index > 0 ? 'space-y-3 border-t border-indigo-500/25 pt-5' : 'space-y-3'}
+            >
+              <div className="flex gap-2.5">
+                <Sparkles
+                  aria-hidden
+                  className="mt-1 size-4 shrink-0 text-indigo-400"
+                  strokeWidth={1.75}
+                />
+                <div className="min-w-0 space-y-2.5">
+                  <p className="text-body-lg font-medium leading-relaxed text-on-ai">{lead}</p>
+                  {bullets.length > 0 && (
+                    <ul className="list-disc space-y-1.5 pl-4 text-body leading-relaxed text-on-ai-muted">
+                      {bullets.map((bullet, bulletIndex) => (
+                        <li key={bulletIndex}>{bullet}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-              </details>
-            )}
-          </div>
-        ))}
+              </div>
+              {insight.evidence.length > 0 && (
+                <details className="rounded-lg bg-surface p-3 text-primary">
+                  <summary className="cursor-pointer text-body-sm font-medium text-navy-600 focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden">
+                    View {insight.evidence.length} source{insight.evidence.length === 1 ? '' : 's'}
+                  </summary>
+                  <div className="mt-3">
+                    <EvidenceList items={insight.evidence} heading="SOURCES" />
+                  </div>
+                </details>
+              )}
+            </div>
+          )
+        })}
       </div>
     </AiPanel>
   )
@@ -456,11 +593,34 @@ function ScanBatchPanel({ batch }: { batch: ScanBatchResponse }) {
   const approved = batch.scans.reduce((sum, scan) => sum + scan.sources_approved, 0)
   const rejected = batch.scans.reduce((sum, scan) => sum + scan.sources_rejected, 0)
   const documents = batch.scans.reduce((sum, scan) => sum + scan.documents_collected, 0)
+  const failedOrgs = batch.scans.filter((s) => s.status === 'failed').length
+  const partialOrgs = batch.scans.filter((s) => s.status === 'partial').length
+  const interruptedOrgs = batch.scans.filter((s) => s.status === 'interrupted').length
+
+  const alertTitle =
+    batch.status === 'failed'
+      ? 'Scan batch failed'
+      : batch.status === 'partial'
+        ? 'Scan batch complete with partial results'
+        : batch.status === 'interrupted'
+          ? 'Scan batch interrupted'
+          : 'Scan batch complete'
+
+  const alertBody =
+    batch.status === 'failed'
+      ? `Organization scan runs failed (${failedOrgs}). This is the batch/org scan outcome — not the same as a single page showing “Extraction failed”.`
+      : batch.status === 'partial'
+        ? `${partialOrgs} organization${partialOrgs === 1 ? '' : 's'} finished with some source or stage issues. A red “Extraction failed” badge on one URL means only that page could not be stored — other pages and orgs may still succeed.`
+        : batch.status === 'interrupted'
+          ? `${interruptedOrgs || batch.organization_count} run${(interruptedOrgs || batch.organization_count) === 1 ? '' : 's'} stopped when the server restarted. Start Scan All again after the backend is up.`
+          : `${approved} approved sources · ${rejected} rejected candidates · ${documents} new or updated documents`
 
   return (
     <div className="space-y-4 rounded-lg border border-default bg-surface-sunken/40 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={complete ? 'soft-positive' : 'soft-ai'}>{batch.status}</Badge>
+        <Badge variant={complete ? (batch.status === 'failed' ? 'soft-risk' : 'soft-positive') : 'soft-ai'}>
+          batch: {batch.status}
+        </Badge>
         <span className="text-caption text-muted">
           {batch.organization_count} organization{batch.organization_count === 1 ? '' : 's'}
         </span>
@@ -469,27 +629,47 @@ function ScanBatchPanel({ batch }: { batch: ScanBatchResponse }) {
       {complete && (
         <Alert
           variant={
-            batch.status === 'failed' ? 'error' : batch.status === 'partial' ? 'attention' : 'success'
-          }
-          title={
             batch.status === 'failed'
-              ? 'Scan failed'
-              : batch.status === 'partial'
-                ? 'Scan complete — some pages could not be collected'
-                : 'Scan complete'
+              ? 'error'
+              : batch.status === 'partial' || batch.status === 'interrupted'
+                ? 'attention'
+                : 'success'
           }
+          title={alertTitle}
         >
-          {approved} approved sources · {rejected} rejected candidates · {documents} new or updated
-          documents
+          {alertBody}
+          {batch.status !== 'interrupted' && batch.status !== 'failed' && (
+            <span className="mt-1 block text-caption">
+              {approved} approved sources · {rejected} rejected candidates · {documents} new or
+              updated documents
+            </span>
+          )}
         </Alert>
       )}
+
+      <p className="text-caption text-muted">
+        Tip: “Extraction failed” on a page is per-URL content collection. Batch/org status above is
+        the overall scan run for that organization.
+      </p>
 
       <ul className="space-y-4">
         {batch.scans.map((scan) => (
           <li key={scan.scan_id} className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-body font-medium text-primary">{scan.organization_name}</p>
-              <Badge variant="soft-neutral">{scan.status}</Badge>
+              <Badge
+                variant={
+                  scan.status === 'failed'
+                    ? 'soft-risk'
+                    : scan.status === 'partial' || scan.status === 'interrupted'
+                      ? 'soft-opportunity'
+                      : scan.status === 'succeeded'
+                        ? 'soft-positive'
+                        : 'soft-neutral'
+                }
+              >
+                org scan: {scan.status}
+              </Badge>
             </div>
             <StageStepper scan={scan} />
             <p className="text-caption text-muted">
@@ -551,7 +731,7 @@ function OrganizationSourcesBlock({
           </Badge>
         )
       case 'failed':
-        return <Badge variant="soft-risk">Extraction failed</Badge>
+        return <Badge variant="soft-risk">This page: extraction failed</Badge>
       default:
         return null
     }
@@ -580,6 +760,13 @@ function OrganizationSourcesBlock({
                 <Badge variant="soft-positive">{source.status}</Badge>
                 {getExtractionBadge(source.extraction_status)}
               </div>
+              {source.extraction_status === 'failed' && (
+                <p className="mt-2 text-caption text-secondary">
+                  Only this URL failed content collection. Other pages and the org scan may still
+                  succeed. Re-run Scan Now on the organization after the backend is restarted if a
+                  page fix was deployed.
+                </p>
+              )}
               <p className="mt-2 text-body text-primary">{source.source_title || 'Official page'}</p>
               <a
                 href={source.url}

@@ -86,7 +86,11 @@ async def list_organizations(
         )
 
     rows = (await session.execute(query.limit(limit).offset(offset))).scalars().all()
-    responses = [await _to_response(session, org, include_detail=False) for org in rows]
+    stats = await _stats_for(session, [org.organization_id for org in rows])
+    responses = [
+        await _to_response(session, org, include_detail=False, stats=stats.get(org.organization_id))
+        for org in rows
+    ]
     return responses, total
 
 
@@ -189,38 +193,78 @@ async def update_organization(
     return await _to_response(session, org, include_detail=True)
 
 
-async def _to_response(
-    session: AsyncSession, org: Organization, *, include_detail: bool
-) -> OrganizationResponse:
-    last_scanned_at = await session.scalar(
-        select(ScanRun.finished_at)
+async def delete_organization(session: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Hard-delete one organization. DB cascades remove only that org's owned rows."""
+    org = await session.get(Organization, organization_id)
+    if org is None:
+        raise NotFoundError("organization")
+
+    active_scan = await session.scalar(
+        select(ScanRun.scan_id)
         .where(
-            ScanRun.organization_id == org.organization_id,
-            ScanRun.finished_at.is_not(None),
+            ScanRun.organization_id == organization_id,
+            ScanRun.status.in_(("queued", "running")),
         )
-        .order_by(ScanRun.finished_at.desc())
         .limit(1)
     )
+    if active_scan is not None:
+        raise ConflictError(
+            "scan",
+            "A scan is still queued or running for this organization. Wait for it to finish, then delete.",
+        )
 
-    signal_count = int(
-        await session.scalar(
-            select(func.count())
-            .select_from(Signal)
-            .where(
-                Signal.organization_id == org.organization_id,
-                Signal.state.in_(("validated", "merged")),
-            )
-        )
-        or 0
+    await session.delete(org)
+    await session.commit()
+
+
+async def _stats_for(
+    session: AsyncSession, organization_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, tuple]:
+    """(last_scanned_at, signal_count, opportunity_count) per organization, in one query."""
+    if not organization_ids:
+        return {}
+    last_scanned = (
+        select(func.max(ScanRun.finished_at))
+        .where(ScanRun.organization_id == Organization.organization_id)
+        .scalar_subquery()
     )
-    opportunity_count = int(
-        await session.scalar(
-            select(func.count())
-            .select_from(Opportunity)
-            .where(Opportunity.organization_id == org.organization_id)
+    signal_count = (
+        select(func.count())
+        .select_from(Signal)
+        .where(
+            Signal.organization_id == Organization.organization_id,
+            Signal.state.in_(("validated", "merged")),
         )
-        or 0
+        .scalar_subquery()
     )
+    opportunity_count = (
+        select(func.count())
+        .select_from(Opportunity)
+        .where(Opportunity.organization_id == Organization.organization_id)
+        .scalar_subquery()
+    )
+    rows = await session.execute(
+        select(Organization.organization_id, last_scanned, signal_count, opportunity_count).where(
+            Organization.organization_id.in_(organization_ids)
+        )
+    )
+    return {
+        row[0]: (row[1], int(row[2] or 0), int(row[3] or 0)) for row in rows.all()
+    }
+
+
+async def _to_response(
+    session: AsyncSession,
+    org: Organization,
+    *,
+    include_detail: bool,
+    stats: tuple | None = None,
+) -> OrganizationResponse:
+    if stats is None:
+        stats = (await _stats_for(session, [org.organization_id])).get(
+            org.organization_id, (None, 0, 0)
+        )
+    last_scanned_at, signal_count, opportunity_count = stats
 
     ipeds = None
     last_scan = None

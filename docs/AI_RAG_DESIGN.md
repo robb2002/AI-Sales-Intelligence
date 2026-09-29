@@ -129,6 +129,9 @@ A candidate is **rejected**, with a stored reason (`FR-SIG-06`), when any of the
 | Document text is empty or the snippet is empty | `NO_EVIDENCE` |
 | The page is clearly not about this organization (name absent, and no stored source identifier ties the record to it) | `NOT_ABOUT_ORGANIZATION` |
 | Content is IPEDS reference data presented as a current event | `REFERENCE_DATA_NOT_A_SIGNAL` |
+| On a **target** organization, `competitor_vendor` snippet has no adoption/partnership cue (e.g. adopted, selected, partnered, implementing, powered by) | `NOT_VENDOR_EVIDENCE` |
+
+`NOT_VENDOR_EVIDENCE` applies only to `market_role = target`. Competitor organizations still classify their own public updates as `competitor_vendor` without that cue check. Peer Update lists exclude names that match tracked competitor organizations (`DATA_SOURCES.md` §8; peers are institutions, not the seeded EdTech competitor set).
 
 Date handling: if the document has no stored date, the signal date is "unavailable". A date the model adds that is not already on the document is stripped, not used as a reason to reject an otherwise valid snippet.
 
@@ -277,20 +280,17 @@ An insight with no evidence id is not stored (`FR-EV-07`). A citation in an Advi
 
 ## 13. RAG ingestion
 
-Indexing is pipeline stage 9. It can run beside extraction. The Advisor reads the index. The scan does not need the index to score (`TECHNICAL_PRD.md` §21).
+Indexing is pipeline stage 9. It runs **asynchronously after documents are stored**, in the same FastAPI process, and must not sit on the Scan Now / Scan All latency path. The Advisor reads the index. The scan does not need the index to score (`TECHNICAL_PRD.md` §21). If chunks are not ready yet, Advisor returns insufficient evidence.
 
 ```
-Normalized document
-  → clean
-  → chunk
-  → attach metadata
-  → embed
-  → store chunk text + metadata + vector in pgvector
+Normalized document (stored by scan)
+  → enqueue document_id (non-blocking)
+  → background: clean → chunk → attach metadata → embed → store in pgvector
 ```
 
 Clean means: drop script and style leftovers, collapse whitespace, keep the title. Do not summarize during cleaning. The chunk text must remain words that appeared in the source, so later snippet checks still make sense.
 
-Unchanged documents (same content hash) are not re-embedded. A changed website document is replaced in place (`DATABASE_DESIGN.md` §6): its old chunks are deleted, it is chunked and embedded again, and extraction runs again on the new body. That is the reindex.
+Unchanged documents (same content hash) are not re-embedded. A changed website document is replaced in place (`DATABASE_DESIGN.md` §6): its old chunks are deleted, it is chunked and embedded again, and extraction runs again on the new body. That is the reindex. The background indexer reloads each document by id, copies `organization_id` and source metadata from that row, and skips write if `content_hash` changed during the embed call.
 
 Only documents from approved sources are indexed (`FR-DATA-02`). Cached fallback documents may be indexed for the demo and must carry the cached flag through chunk metadata (`FR-FB-03`).
 
@@ -338,7 +338,7 @@ Similarity search filters on `organization_id` before ranking. A chunk without a
 
 ## 16. Embeddings
 
-One embedding model serves both RAG and deduplication tier 4. **Updated 2026-09-25:** Azure OpenAI `text-embedding-3-small` (deployment name in `EMBEDDING_MODEL`), chat `interns-gpt-4.1` (`LLM_MODEL`), same Azure resource/key, vector width **1536**. Calls go through the embedding adapter only.
+One embedding model serves both RAG and deduplication tier 4. **Updated 2026-09-27:** Azure OpenAI `text-embedding-ada-002` (deployment name in `EMBEDDING_MODEL`), chat `interns-gpt-4.1` (`LLM_MODEL`), same Azure resource/key, vector width **1536**. Calls go through the embedding adapter only.
 
 Rules that are already fixed:
 
@@ -371,9 +371,13 @@ There is no query that searches across all organizations for an Advisor answer. 
 
 | Use | Filter | K | Sufficiency |
 |---|---|---|---|
-| Advisor question about an organization | That organization | 6 | At least 1 chunk with cosine similarity ≥ the gate |
-| Advisor question about an opportunity | That organization, and chunks linked to the opportunity's signals first | 6 | Same gate. If the linked chunks exist, they are included even when other chunks are weak |
+| Advisor question about an organization | That organization | Pool 12 → filter short/weak → light keyword rerank → top **4** | At least 1 chunk with cosine similarity ≥ the gate |
+| Advisor question about an opportunity | That organization, and chunks linked to the opportunity's signals first | Same pool / filter / rerank → top **4** | Same gate. If the linked chunks exist, they are included even when other chunks are weak |
 | Organization briefing during a scan | Not retrieval-first. The briefing is written from the validated signal snippets already stored. Retrieval is not required |
+
+K is the number of RECORD blocks passed to the model after Advisor-local filtering. The similarity
+gate stays **0.72** (§18). Weak or empty chunks are dropped before the model call so answers stay
+fast and on-point. There is no cross-encoder reranker.
 | Competitor/vendor briefing | That organization, signal type `COMPETITOR_VENDOR` | 6 | If none, the briefing says there is no competitor/vendor evidence |
 | Score explanation | Not a vector search. The prompt receives the stored breakdown and the group's snippets |
 
@@ -504,6 +508,9 @@ Session behavior: the scope stays for follow-up questions. The server stores the
 
 Timeout: `LLM_TIMEOUT_SECONDS`. On timeout the user sees that the Advisor is unavailable. No partial answer.
 
+Answer shape for the UI: short point-wise bullets with optional sparse `**bold**` in segment text.
+Grounding is unchanged — Azure only; FACT still requires cited RECORDs.
+
 The Advisor cannot create a scan, a signal, or a score.
 
 ---
@@ -522,8 +529,10 @@ drafts and briefs from the same stored evidence.
 | Live lookups | Only the domains in `DATA_SOURCES.md` §7 and the official website of a tracked organization, through the scan `Fetcher`. No open-web search, no third-party search provider |
 | Emails | Draft text the rep copies. Nothing is sent. Unknown recipient details use placeholders. No claim about an RFP, budget, or decision the sources do not state |
 | Excelsoft claims | The model may not state Excelsoft products, features, customers, or results. It uses a placeholder for the rep to confirm |
-| Output | Structured blocks (heading, paragraph, bullets, email) with numbered source refs. No ids are shown to the user |
+| Output | Structured blocks (heading, paragraph, bullets, table, email) with numbered source refs. Paragraph/bullet text may use sparse `**bold**`; optional light emoji in headings. No ids are shown to the user |
+| LLM | May use a separate Gemini config (`PERSONA_GEMINI_*`) for Persona replies only. Advisor, scan extraction, and embeddings stay on the Azure path. Grounding rules above are unchanged either way |
 | Scope choice | The chat starts by asking whether the question is about a tracked organization or about general/outside data. An organization is picked from a suggestion list and the chat then works the Advisor way (only that organization's data, insufficient evidence when there is none). Otherwise it is the general workflow. `API_CONTRACT.md` §12.3 `scope` |
+| Retrieval | Persona-only: candidate pool per focus org, drop empty/short/below-gate chunks, light keyword-overlap rerank, keep top N. Advisor uses the same style of pool / filter / rerank under §17 (gate remains 0.72) |
 | State | Stateless on the server. The client sends the last six turns |
 | Not changed | Scan, signal, correlation, and scoring pipelines. The persona only reads their output |
 
@@ -728,7 +737,7 @@ If the provider quota is exhausted, new explanations and Advisor answers become 
 In scope for the week:
 
 - The nine pipeline stages in `TECHNICAL_PRD.md` §21, with the checks in this document.
-- One embedding model shared with dedup: Azure `text-embedding-3-small`, width 1536; chat `interns-gpt-4.1` (**Updated 2026-09-25**).
+- One embedding model shared with dedup: Azure `text-embedding-ada-002`, width 1536; chat `interns-gpt-4.1` (**Updated 2026-09-27**). Indexing is background, not on the scan critical path.
 - Advisor over one organization or one opportunity, with the sufficiency gate.
 - Score `v1` explained, not chosen, by the model.
 - Manual prompt versions. No prompt-management service.

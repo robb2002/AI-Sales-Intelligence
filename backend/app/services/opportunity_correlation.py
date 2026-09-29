@@ -1,6 +1,7 @@
 """Correlate validated signals → one potential opportunity + rules score (M7).
 
-AI_RAG_DESIGN.md §§8–10. Score explanation (M8) left unavailable.
+Score explanation (M8) and recommended next action (AI_RAG_DESIGN.md §27) run after
+the rules score is stored. Failures leave those fields unavailable; the score stays.
 """
 
 from __future__ import annotations
@@ -146,6 +147,8 @@ async def correlate_organization_opportunity(
             await _record_source(session, scan, "succeeded", result.skipped_reason)
             return result
 
+    # Release the pooled connection before the model call (only reads happened above).
+    await session.commit()
     correlation_text = await _correlation_text(llm, org=org, group=best_group)
     data_origin = (
         "cached"
@@ -182,6 +185,8 @@ async def correlate_organization_opportunity(
     )
 
     # M8: explain the stored number. Failure leaves explanation unavailable (score stays).
+    # The score is committed first so the model call does not hold a pooled connection.
+    await session.commit()
     explanation = await _score_explanation(
         llm,
         org=org,
@@ -192,6 +197,20 @@ async def correlate_organization_opportunity(
         await scores_repo.set_explanation(
             session, score_id=score_row.score_id, explanation_text=explanation
         )
+
+    # §27 recommended next research/action — evidence-backed; null if validation fails.
+    recommendation = await _recommend_action(
+        session,
+        llm,
+        org=org,
+        score_value=breakdown.value,
+        score_band=breakdown.band,
+        correlation_text=correlation_text,
+        group=best_group,
+    )
+    if recommendation:
+        opportunity.recommended_action_text = recommendation
+        await session.flush()
 
     if existing is None:
         result.created = 1
@@ -206,10 +225,11 @@ async def correlate_organization_opportunity(
     result.previous_score = previous
 
     explain_note = "explanation=ready" if explanation else "explanation=unavailable"
+    action_note = "action=ready" if recommendation else "action=unavailable"
     detail = (
         f"opportunity={opportunity.opportunity_id} score={breakdown.value} "
         f"band={breakdown.band} signals={len(signal_ids)} types="
-        f"{sorted({v.signal.signal_type for v in best_group})} {explain_note}"
+        f"{sorted({v.signal.signal_type for v in best_group})} {explain_note} {action_note}"
     )
     await _record_source(session, scan, "succeeded", detail)
     return result
@@ -261,6 +281,131 @@ def _explanation_text_ok(text: str, *, value: int, band: str) -> bool:
     if band.lower() not in lower:
         return False
     return not any(phrase in lower for phrase in _FORBIDDEN)
+
+
+async def _recommend_action(
+    session: AsyncSession,
+    llm: LLMProviderAdapter,
+    *,
+    org: Organization,
+    score_value: int,
+    score_band: str,
+    correlation_text: str,
+    group: list[_SignalView],
+) -> str | None:
+    records, allowed_ids = await _recommend_records(session, org=org, group=group)
+    if not records:
+        return None
+    try:
+        payload = await llm.recommend_action(
+            organization_name=org.name,
+            score_value=score_value,
+            score_band=score_band,
+            correlation_text=correlation_text,
+            records=records,
+        )
+    except Exception:
+        logger.exception("Recommended action LLM failed; leaving unavailable")
+        return None
+    text = str(payload.get("text") or "").strip()
+    if not text or not _recommendation_text_ok(text):
+        logger.warning("Recommended action rejected (empty or forbidden phrasing)")
+        return None
+    raw_ids = payload.get("evidence_ids") or []
+    cited: list[str] = []
+    if isinstance(raw_ids, list):
+        for item in raw_ids:
+            if isinstance(item, str) and item.strip().lower() in allowed_ids:
+                cited.append(item.strip())
+    if not cited:
+        logger.warning("Recommended action rejected (no valid evidence_id citation)")
+        return None
+    return text[:2500]
+
+
+async def ensure_recommended_action(
+    session: AsyncSession,
+    llm: LLMProviderAdapter,
+    *,
+    opportunity: opportunities_repo.Opportunity,
+    org: Organization,
+    score_value: int,
+    score_band: str,
+    signals: list[Signal],
+) -> str | None:
+    """Backfill §27 text for opportunities created before recommend was wired."""
+    if opportunity.recommended_action_text:
+        return opportunity.recommended_action_text
+    if not signals:
+        return None
+    views = await _load_views(session, signals)
+    if not views:
+        return None
+    text = await _recommend_action(
+        session,
+        llm,
+        org=org,
+        score_value=score_value,
+        score_band=score_band,
+        correlation_text=opportunity.correlation_text,
+        group=views,
+    )
+    if text:
+        opportunity.recommended_action_text = text
+        await session.flush()
+    return text
+
+
+async def _recommend_records(
+    session: AsyncSession,
+    *,
+    org: Organization,
+    group: list[_SignalView],
+) -> tuple[list[dict[str, str]], set[str]]:
+    records: list[dict[str, str]] = []
+    allowed: set[str] = set()
+    source_cache: dict[uuid.UUID, Source | None] = {}
+    for view in group:
+        for ev in view.evidence[:3]:
+            eid = str(ev.evidence_id)
+            allowed.add(eid.lower())
+            if ev.source_id is None:
+                source_name = f"{org.name} official website"
+            else:
+                if ev.source_id not in source_cache:
+                    source_cache[ev.source_id] = await session.get(Source, ev.source_id)
+                source = source_cache[ev.source_id]
+                source_name = (source.name if source and source.name else None) or "Public source"
+            records.append(
+                {
+                    "evidence_id": eid,
+                    "signal_type": view.signal.signal_type,
+                    "title": view.signal.title,
+                    "source_name": source_name,
+                    "published_on": (
+                        ev.published_on.isoformat() if ev.published_on else "unavailable"
+                    ),
+                    "snippet": (ev.snippet or "")[:400],
+                }
+            )
+    return records, allowed
+
+
+def _recommendation_text_ok(text: str) -> bool:
+    lower = text.lower()
+    if any(phrase in lower for phrase in _FORBIDDEN):
+        return False
+    # Extra sales-claim blockers for recommended actions (§27).
+    extra = (
+        "you will win",
+        "submit a bid",
+        "we will contact",
+        "system will email",
+        "guaranteed deal",
+        "confirmed rfp",
+    )
+    return not any(phrase in lower for phrase in extra)
+
 
 async def _load_views(session: AsyncSession, signals: list[Signal]) -> list[_SignalView]:
     views: list[_SignalView] = []

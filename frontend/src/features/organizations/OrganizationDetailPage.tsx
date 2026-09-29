@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, ExternalLink, Pencil, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import { Building2, ExternalLink, Pencil, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { isApiError } from '../../api/client'
@@ -24,8 +24,10 @@ import { TrackingToggle } from '../../components/ui/TrackingToggle'
 import { useDocumentTitle } from '../../lib/useDocumentTitle'
 import type { ScanDetail } from '../../types/api'
 import { useCurrentUser } from '../auth/useCurrentUser'
+import { DeleteOrganizationModal } from './DeleteOrganizationModal'
 import { OrganizationFormModal } from './OrganizationFormModal'
 import { PeerCompetitorsCard } from './PeerCompetitorsCard'
+import { scanOutcomeSummary } from './scanOutcomeCopy'
 
 const TYPE_LABELS: Record<string, string> = {
   university: 'University',
@@ -64,6 +66,7 @@ export function OrganizationDetailPage() {
   const isManager = user?.role === 'SALES_MANAGER'
   const queryClient = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [scanId, setScanId] = useState<string | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -92,7 +95,8 @@ export function OrganizationDetailPage() {
     enabled: Boolean(scanId),
     refetchInterval: (q) => {
       const status = (q.state.data as ScanDetail | undefined)?.status
-      return status === 'queued' || status === 'running' ? 2000 : false
+      // 5s matches dashboard batch polling; avoids auth/DB pressure during long scans.
+      return status === 'queued' || status === 'running' ? 5000 : false
     },
   })
 
@@ -168,15 +172,25 @@ export function OrganizationDetailPage() {
     },
   })
 
-  async function onScanNow() {
-    setScanError(null)
-    try {
-      const scan = await startOrganizationScan(organizationId)
+  const scanMutation = useMutation({
+    mutationFn: () => startOrganizationScan(organizationId),
+    onMutate: () => {
+      setScanError(null)
+    },
+    onSuccess: (scan) => {
       setScanId(scan.scan_id)
-    } catch (err) {
+      // Seed cache so progress UI appears before the first poll round-trip.
+      queryClient.setQueryData(['scans', scan.scan_id], {
+        ...scan,
+        sources: [],
+        error_detail: null,
+        changes: {},
+      } satisfies ScanDetail)
+    },
+    onError: (err) => {
       setScanError(isApiError(err) ? err.message : 'Scan could not be started.')
-    }
-  }
+    },
+  })
 
   if (orgQuery.isLoading) {
     return (
@@ -200,8 +214,12 @@ export function OrganizationDetailPage() {
 
   const org = orgQuery.data
   const sources = sourcesQuery.data?.data ?? []
-  const scanRunning =
-    scanQuery.data?.status === 'queued' || scanQuery.data?.status === 'running' || false
+  const scanStatus = scanQuery.data?.status
+  const scanRunning = scanStatus === 'queued' || scanStatus === 'running'
+  const scanBusy = scanMutation.isPending || scanRunning
+  const scanDoneOk =
+    !scanBusy && (scanStatus === 'succeeded' || scanStatus === 'partial') && scanQuery.data
+  const scanOutcome = scanDoneOk ? scanOutcomeSummary(scanQuery.data) : null
   const orgActive = org.tracking_status === 'active'
   const websiteHost = hostLabel(org.website_url)
 
@@ -270,6 +288,14 @@ export function OrganizationDetailPage() {
                   pendingStatus={trackingMutation.variables ?? null}
                   onChange={(status) => trackingMutation.mutate(status)}
                 />
+                <Button
+                  variant="danger"
+                  icon={Trash2}
+                  disabled={scanBusy}
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  Delete
+                </Button>
               </>
             )}
             <Button
@@ -284,9 +310,9 @@ export function OrganizationDetailPage() {
             <Button
               variant="primary"
               icon={RefreshCw}
-              loading={scanRunning}
-              disabled={!orgActive}
-              onClick={() => void onScanNow()}
+              loading={scanBusy}
+              disabled={!orgActive || scanBusy}
+              onClick={() => scanMutation.mutate()}
             >
               Scan Now
             </Button>
@@ -306,25 +332,48 @@ export function OrganizationDetailPage() {
             : 'Try again in a moment.'}
         </Alert>
       )}
-      {scanQuery.data && (scanQuery.data.status === 'queued' || scanQuery.data.status === 'running') && (
+      {scanMutation.isPending && (
+        <Alert variant="info" title="Starting scan">
+          Contacting the server. Progress will appear here in a moment.
+        </Alert>
+      )}
+      {scanRunning && (
         <Alert variant="info" title="Scan in progress">
-          Stage: {scanQuery.data.stage ?? 'starting'}. You can leave this page; progress continues on
+          Stage: {scanQuery.data?.stage ?? 'starting'}. You can leave this page; progress continues on
           the server.
         </Alert>
       )}
-      {scanQuery.data?.status === 'succeeded' && (
-        <Alert variant="success" title="Scan completed">
-          Sources and signals were refreshed from public pages.
+      {scanOutcome && (
+        <Alert variant="success" title={scanOutcome.title}>
+          <p>{scanOutcome.summary}</p>
+          {scanOutcome.failedSourceNote && (
+            <p className="mt-1">{scanOutcome.failedSourceNote}</p>
+          )}
+          {(scanOutcome.signalsCreated > 0 || scanOutcome.opportunitiesCreated > 0) && (
+            <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+              {scanOutcome.signalsCreated > 0 && (
+                <Link
+                  to={`/signals?organization_id=${org.organization_id}`}
+                  className="font-medium text-navy-600 hover:underline"
+                >
+                  View signals
+                </Link>
+              )}
+              {scanOutcome.opportunitiesCreated > 0 && (
+                <Link
+                  to={`/opportunities?organization_id=${org.organization_id}`}
+                  className="font-medium text-navy-600 hover:underline"
+                >
+                  View opportunities
+                </Link>
+              )}
+            </p>
+          )}
         </Alert>
       )}
-      {scanQuery.data?.status === 'partial' && (
-        <Alert variant="attention" title="Scan completed with some failures">
-          Open Signals or check approved sources below for what was collected.
-        </Alert>
-      )}
-      {scanQuery.data?.status === 'failed' && (
+      {!scanBusy && scanStatus === 'failed' && (
         <Alert variant="error" title="Scan failed">
-          {(scanQuery.data as ScanDetail).error_detail ?? 'See scan detail for more.'}
+          {scanQuery.data?.error_detail ?? 'See scan detail for more.'}
         </Alert>
       )}
 
@@ -474,8 +523,9 @@ export function OrganizationDetailPage() {
                   <Button
                     variant="primary"
                     icon={RefreshCw}
-                    disabled={!orgActive}
-                    onClick={() => void onScanNow()}
+                    loading={scanBusy}
+                    disabled={!orgActive || scanBusy}
+                    onClick={() => scanMutation.mutate()}
                   >
                     Scan Now
                   </Button>
@@ -551,8 +601,8 @@ export function OrganizationDetailPage() {
           </Card>
           {!isManager && (
             <Alert variant="info" title="View only">
-              Sales representatives can view organizations and run Scan Now. A Sales Manager adds or
-              edits organization identity.
+              Sales representatives can view organizations and run Scan Now. A Sales Manager adds,
+              edits, or deletes organization identity.
             </Alert>
           )}
         </aside>
@@ -565,6 +615,21 @@ export function OrganizationDetailPage() {
         onClose={() => setEditOpen(false)}
         onSaved={() => {
           void queryClient.invalidateQueries({ queryKey: ['organizations'] })
+        }}
+      />
+      <DeleteOrganizationModal
+        open={deleteOpen}
+        organizationId={org.organization_id}
+        organizationName={org.name}
+        marketRole={org.market_role}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={() => {
+          void queryClient.invalidateQueries({ queryKey: ['organizations'] })
+          void queryClient.invalidateQueries({ queryKey: ['competitors'] })
+          void queryClient.invalidateQueries({ queryKey: ['signals'] })
+          void queryClient.invalidateQueries({ queryKey: ['opportunities'] })
+          void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+          void navigate(org.market_role === 'competitor' ? '/competitors' : '/organizations')
         }}
       />
     </div>

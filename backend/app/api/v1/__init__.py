@@ -13,6 +13,7 @@ from app.api.v1 import (
     persona,
     scans,
     signals,
+    trends,
 )
 
 public_router = APIRouter(prefix="/api/v1")
@@ -30,3 +31,4 @@ protected_router.include_router(dashboard.router)
 protected_router.include_router(competitors.router)
 protected_router.include_router(peer_competitors.router)
 protected_router.include_router(persona.router)
+protected_router.include_router(trends.router)

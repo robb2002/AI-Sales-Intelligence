@@ -4,6 +4,7 @@ import { cn } from '../../lib/cn'
 import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
 import { AiPanel } from './AiPanel'
+import { ReadableAiBody } from './ReadableInterpretation'
 
 const BAND_BADGE: Record<ScoreBand, string> = {
   high: 'border-transparent bg-amber-50 text-amber-700',
@@ -75,7 +76,9 @@ export function ScoreDisplay({ score }: { score: ScorePayload }) {
 
       <div className="mt-6">
         {score.explanation_status === 'ready' && score.explanation ? (
-          <AiPanel label="explanation">{score.explanation.text}</AiPanel>
+          <AiPanel label="explanation">
+            <ReadableAiBody text={score.explanation.text} tone="dark" />
+          </AiPanel>
         ) : (
           <div className="rounded-xl border border-dashed border-indigo-200 bg-surface-ai-subtle px-5 py-4">
             <p className="text-label text-indigo-600 uppercase">AI explanation unavailable</p>

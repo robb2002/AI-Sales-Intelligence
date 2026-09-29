@@ -5,12 +5,14 @@ import { Link, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
 import { listOpportunities } from '../../api/opportunities'
 import { OpportunityCard } from '../../components/intelligence/OpportunityCard'
+import { Card } from '../../components/ui/Card'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { ErrorState } from '../../components/ui/ErrorState'
 import { Skeleton } from '../../components/ui/Skeleton'
 import type { ScoreBand } from '../../types/api'
 import { SCORE_BAND_LABELS } from '../intelligence/labels'
 import { useDocumentTitle } from '../../lib/useDocumentTitle'
+import { ScoreBandChart } from '../dashboard/ScoreBandChart'
 
 const BANDS: ScoreBand[] = ['high', 'medium', 'low', 'monitor']
 
@@ -36,6 +38,20 @@ export function OpportunitiesPage() {
   const selectClass =
     'h-10 rounded-md border border-default bg-surface px-3 text-body text-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden'
 
+  const rows = query.data?.data ?? []
+  const byBand = useMemo(() => {
+    const counts: Record<ScoreBand, number> = {
+      high: 0,
+      medium: 0,
+      low: 0,
+      monitor: 0,
+    }
+    for (const row of rows) {
+      counts[row.score.band] += 1
+    }
+    return counts
+  }, [rows])
+
   const content = useMemo(() => {
     if (query.isLoading) {
       return (
@@ -57,7 +73,6 @@ export function OpportunitiesPage() {
         />
       )
     }
-    const rows = query.data?.data ?? []
     if (rows.length === 0) {
       return (
         <EmptyState
@@ -97,14 +112,41 @@ export function OpportunitiesPage() {
         ))}
       </div>
     )
-  }, [band, params, query, setParams])
+  }, [band, params, query, rows, setParams])
+
+  const total = query.data?.total ?? 0
 
   return (
     <div className="space-y-6">
-      <p className="text-body-sm text-secondary">
-        Prioritized potential opportunities. The rules score is always shown with its factors and
-        explanation status — never as a bare number.
-      </p>
+      <div>
+        <h1 className="text-h1 text-primary">Potential opportunities</h1>
+        <p className="mt-1 text-body-sm text-secondary">
+          Prioritized by rules score. Factors and AI explanation stay attached — never a bare number.
+          Nothing here is guaranteed; each item is a potential opportunity backed by evidence.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Card className="p-4">
+          <p className="text-label text-secondary uppercase">Total</p>
+          <p className="mt-1 text-metric tabular-nums text-primary">
+            {query.isLoading ? '—' : total}
+          </p>
+        </Card>
+        {BANDS.map((b) => (
+          <Card key={b} className="p-4">
+            <p className="text-label text-secondary uppercase">{SCORE_BAND_LABELS[b]}</p>
+            <p className="mt-1 text-metric tabular-nums text-primary">
+              {query.isLoading ? '—' : byBand[b]}
+            </p>
+            <p className="mt-0.5 text-caption text-muted">In loaded list</p>
+          </Card>
+        ))}
+      </div>
+
+      {!query.isLoading && rows.length > 0 && (
+        <ScoreBandChart byBand={byBand} />
+      )}
 
       <div className="flex flex-col gap-3 rounded-lg border border-default bg-surface p-4 shadow-xs sm:flex-row sm:items-end">
         <label>
@@ -143,12 +185,6 @@ export function OpportunitiesPage() {
           </select>
         </label>
       </div>
-
-      <p className="text-caption text-secondary">
-        {query.data
-          ? `${query.data.total} potential opportunit${query.data.total === 1 ? 'y' : 'ies'}`
-          : '—'}
-      </p>
 
       {content}
     </div>

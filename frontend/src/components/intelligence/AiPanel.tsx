@@ -5,8 +5,8 @@ import { cn } from '../../lib/cn'
 const LABELS = {
   interpretation: 'AI INTERPRETATION',
   explanation: 'AI EXPLANATION',
-  correlation: 'WHY THESE SIGNALS ARE CONNECTED',
-  recommended: 'RECOMMENDED RESEARCH / ACTION',
+  correlation: 'WHY THIS OPPORTUNITY',
+  recommended: 'RECOMMENDED NEXT ACTION',
   advisor: 'AI SALES ADVISOR',
 } as const
 

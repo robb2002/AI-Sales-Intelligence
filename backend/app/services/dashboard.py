@@ -11,7 +11,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories import dashboard as dashboard_repo
-from app.repositories import evidence as evidence_repo
 from app.repositories.scans import ScanRun
 from app.repositories.signals import SIGNAL_TYPES
 from app.schemas.dashboard import (
@@ -33,6 +32,9 @@ _MAX_PRIORITIZED = 5
 _MAX_RECENT_SIGNALS = 6
 _MAX_INSIGHTS = 3
 _EVIDENCE_PER_INSIGHT = 3
+# The scan chip only reads the latest batch cohort (one run per tracked organization, 10–20 in
+# the MVP) plus any run still active, so three batches' worth of rows is enough.
+_SCAN_RUNS_FOR_STATUS = 60
 _ACTIVE_STATUSES = ("queued", "running")
 _TERMINAL_STATUSES = ("succeeded", "partial", "failed", "interrupted")
 
@@ -63,14 +65,19 @@ async def build_dashboard(session: AsyncSession) -> DashboardResponse:
     ]
 
     # --- signals -------------------------------------------------------------------
-    counts = await dashboard_repo.validated_counts(session, since=window_start)
-    by_type = {signal_type: counts.get(signal_type, (0, 0))[0] for signal_type in SIGNAL_TYPES}
-    recent_count = sum(recent for _total, recent in counts.values())
-    competitor_new = counts.get("competitor_vendor", (0, 0))[1]
+    by_type = dict.fromkeys(SIGNAL_TYPES, 0)
+    recent_by_type: dict[str, int] = {}
+    per_day: dict = {}
+    for signal_type, day, count in await dashboard_repo.validated_counts_by_type_and_day(session):
+        by_type[signal_type] = by_type.get(signal_type, 0) + count
+        if day is not None and day >= window_start:
+            recent_by_type[signal_type] = recent_by_type.get(signal_type, 0) + count
+            if day <= today:
+                per_day[day] = per_day.get(day, 0) + count
+    by_type = {signal_type: by_type[signal_type] for signal_type in SIGNAL_TYPES}
+    recent_count = sum(recent_by_type.values())
+    competitor_new = recent_by_type.get("competitor_vendor", 0)
 
-    per_day = await dashboard_repo.validated_counts_per_day(
-        session, since=window_start, until=today
-    )
     volume = [
         SignalVolumePoint(date=day, count=per_day.get(day, 0))
         for day in (window_start + timedelta(days=i) for i in range(_WINDOW_DAYS))
@@ -78,9 +85,6 @@ async def build_dashboard(session: AsyncSession) -> DashboardResponse:
 
     recent_rows = await dashboard_repo.recent_validated_signals(
         session, limit=_MAX_RECENT_SIGNALS
-    )
-    evidence_counts = await evidence_repo.count_for_signals(
-        session, [signal.signal_id for signal, _name in recent_rows]
     )
     recent_signals = [
         SignalSummary(
@@ -93,10 +97,10 @@ async def build_dashboard(session: AsyncSession) -> DashboardResponse:
             summary=signal.summary,
             date=signal.published_on,
             date_status="available" if signal.published_on else "unavailable",
-            source_count=evidence_counts.get(signal.signal_id, 0),
+            source_count=evidence_count,
             data_origin=signal.data_origin,
         )
-        for signal, organization_name in recent_rows
+        for signal, organization_name, evidence_count in recent_rows
     ]
 
     # --- grounded insights (stored explanations only) -------------------------------
@@ -123,7 +127,9 @@ async def build_dashboard(session: AsyncSession) -> DashboardResponse:
         competitor_vendor=DashboardCompetitorVendor(
             validated_total=by_type.get("competitor_vendor", 0), new_in_window=competitor_new
         ),
-        scan_status=_scan_status(await dashboard_repo.recent_scan_runs(session)),
+        scan_status=_scan_status(
+            await dashboard_repo.recent_scan_runs(session, limit=_SCAN_RUNS_FOR_STATUS)
+        ),
         prioritized_opportunities=prioritized,
         recent_signals=recent_signals,
         signal_volume=volume,
@@ -132,6 +138,13 @@ async def build_dashboard(session: AsyncSession) -> DashboardResponse:
 
 
 def _scan_status(runs: list[ScanRun]) -> DashboardScanStatus:
+    """Portfolio scan chip for the Command Center (API_CONTRACT §10).
+
+    Prefer batch health over a single org. Org runs marked ``partial`` (for example one
+    page URL failed while others collected) count as healthy for this chip — show
+    ``current``, not failed. Interrupted runs are ``partial``. Red ``failed`` only when
+    the latest finished cohort has no successful or soft-success org runs.
+    """
     running = any(run.status in _ACTIVE_STATUSES for run in runs)
     finished = [
         run for run in runs if run.status in _TERMINAL_STATUSES and run.finished_at is not None
@@ -146,27 +159,52 @@ def _scan_status(runs: list[ScanRun]) -> DashboardScanStatus:
         )
 
     last = max(finished, key=lambda run: run.finished_at)
-    batch = [run for run in runs if last.batch_id is not None and run.batch_id == last.batch_id]
-    failed = sum(
+    if last.batch_id is not None:
+        cohort = [
+            run
+            for run in runs
+            if run.batch_id == last.batch_id and run.status in _TERMINAL_STATUSES
+        ]
+        if not cohort:
+            cohort = [last]
+    else:
+        cohort = [last]
+
+    # Soft success: org finished useful work even if a page/source row failed.
+    healthy = sum(1 for run in cohort if run.status in ("succeeded", "partial"))
+    failed = sum(1 for run in cohort if run.status == "failed")
+    interrupted = sum(1 for run in cohort if run.status == "interrupted")
+
+    sources_failed = sum(
         1
-        for run in (batch or [last])
+        for run in cohort
         for source in (run.sources or [])
         if isinstance(source, dict) and source.get("status") == "failed"
     )
+
     if running:
         state = "running"
-    elif last.status == "succeeded":
+    elif healthy and not failed and not interrupted:
         state = "current"
-    elif last.status == "partial":
+    elif healthy and (failed or interrupted):
+        state = "partial"
+    elif interrupted and not failed and not healthy:
+        state = "partial"
+    elif failed and not healthy:
+        state = "failed"
+    elif last.status in ("succeeded", "partial"):
+        state = "current"
+    elif last.status == "interrupted":
         state = "partial"
     else:
         state = "failed"
+
     return DashboardScanStatus(
         state=state,
         last_finished_at=last.finished_at,
         running=running,
         last_status=last.status,
-        sources_failed=failed,
+        sources_failed=sources_failed,
     )
 
 

@@ -422,6 +422,25 @@ present and what must be reachable.
 - `FR-DASH-10` — MUST handle the empty state honestly: a new deployment with no scans shows a
   clear "no data collected yet" state, never fabricated placeholder figures.
 
+### 16a. Trend view (added 2026-09-28, P2)
+
+Answers the Sales Manager's "where is activity concentrated?" (§4.2) with a short, observed
+history. It is not trend forecasting, which stays out of scope (§24, §30). Layout belongs to
+`UI_UX_DESIGN.md` §28a; the data contract is `API_CONTRACT.md` §10b.
+
+- `FR-TRD-01` — MUST show monthly counts of validated signals for a selectable recent window (3, 6,
+  or 12 months), broken down by signal type, by state, and by organization type (vertical).
+- `FR-TRD-02` — MUST count only signals of target organizations. Competitor organizations are
+  vendors and MUST NOT count toward a state's or vertical's activity.
+- `FR-TRD-03` — MUST derive every figure from stored validated signals. No model call, forecast,
+  projection, growth rate, or "fastest-growing" claim.
+- `FR-TRD-04` — MUST place a signal in a month only by its source publication date. A signal
+  without one MUST be reported as undated, never assigned a guessed month.
+- `FR-TRD-05` — MUST state the basis (how many signals and organizations were counted), so thin
+  data is visible rather than hidden.
+- `FR-TRD-06` — Every figure MUST be drillable to the underlying signals (same rule as
+  `FR-DASH-08`), and the empty state MUST be honest (same rule as `FR-DASH-10`).
+
 ---
 
 ## 17. Organization profile requirements
@@ -589,7 +608,7 @@ opportunity details (§18), signal details (§19), search and filter (§20), Sca
 |---|---|---|
 | P0 — must work for the demo | MVP-01 through MVP-11, auth, organization profile, opportunity details, evidence display, Scan Now and Scan All | This is the product; without the full chain there is nothing to show |
 | P1 — build if the chain is working | Dashboard metrics, search and filter, scheduled scanning, score history | Valuable, but each is meaningless without P0 |
-| P2 — only if time genuinely remains | Trend visualization over time, competitor/vendor summary views | Presentation polish on top of working intelligence |
+| P2 — only if time genuinely remains | Trend visualization over time (approved to build 2026-09-28 as the §16a trend view), competitor/vendor summary views | Presentation polish on top of working intelligence |
 
 ### 23.3 Realism constraints
 
@@ -692,7 +711,7 @@ ownership or assignment filter in the MVP.
 | View portfolio-wide metrics across all tracked organizations | Yes | Yes |
 | View competitor/vendor intelligence summary | Yes | Yes |
 
-For the MVP both roles see the same intelligence. Organization **identity** writes are manager-only so the tracked set stays curated. There is still no separate manager-only screen — Add/Edit/Activate controls appear on the shared Organizations pages for managers only (`UI_UX_DESIGN.md`).
+For the MVP both roles see the same intelligence. Organization **identity** writes are manager-only so the tracked set stays curated. There is still no separate manager-only screen — Add/Edit/Activate/Delete controls appear on the shared Organizations pages for managers only (`UI_UX_DESIGN.md`).
 
 - `FR-ROLE-01` — Every user MUST have exactly one role: `SALES_REP` or `SALES_MANAGER`.
 - `FR-ROLE-02` — Authorization MUST be enforced server-side on every protected operation,
@@ -701,9 +720,9 @@ For the MVP both roles see the same intelligence. Organization **identity** writ
   system does not show a manager a different set of facts.
 - `FR-ROLE-04` — List and detail queries MUST NOT filter organizations, signals, or opportunities
   by the calling user. Assignment is out of MVP scope.
-- `FR-ROLE-05` — Only `SALES_MANAGER` MAY create or update organization identity fields and
-  `tracking_status`. `SALES_REP` MUST receive `403 INSUFFICIENT_PERMISSION` on those write
-  operations.
+- `FR-ROLE-05` — Only `SALES_MANAGER` MAY create, update, or permanently delete organization
+  identity (including `tracking_status` and hard delete). `SALES_REP` MUST receive
+  `403 INSUFFICIENT_PERMISSION` on those write operations.
 - `FR-ORG-09` — Before creating or changing an organization's `website_url`, the system MUST
   live-validate that the official public website is reachable over HTTPS (or HTTP redirecting to
   HTTPS), is not gated by login/CAPTCHA/paywall markers checked by the fetcher, and store the
@@ -712,6 +731,11 @@ For the MVP both roles see the same intelligence. Organization **identity** writ
   (`organization_sources`). The URL MUST pass the same live validation as `FR-ORG-09` and MUST
   stay on the organization's official host. Registry APIs (SAM.gov, IPEDS, USAspending) MUST NOT
   be added through this path.
+- `FR-ORG-11` — Only `SALES_MANAGER` MAY permanently delete an organization (target or competitor).
+  Delete MUST remove that organization's owned intelligence data and MUST NOT modify other
+  organizations or shared registry sources. Delete MUST be refused while a scan for that
+  organization is `queued` or `running`. Deactivate (`tracking_status = inactive`) remains the
+  non-destructive way to stop scanning.
 
 ---
 
@@ -792,7 +816,7 @@ are not lost and not smuggled into the build.
 | Opportunity triage states (reviewed, dismissed, pursuing) | Useful workflow; adds state management not needed to prove the intelligence works |
 | Organization ownership and assignment to reps | Explicitly not in the MVP (`FR-ROLE-04`). Both roles see every tracked organization |
 | Alerting and notifications on new high-score opportunities | Natural next step once scoring is trusted |
-| Trend analysis over longer time horizons | Requires accumulated history the hackathon will not have |
+| Trend analysis over longer time horizons | Requires accumulated history the hackathon will not have. The short-window observed counts in §16a are in scope; longer horizons, forecasting, and regulatory-demand analysis are not |
 | Additional signal categories beyond the seven | Closed taxonomy; requires explicit approval |
 | Additional data sources and third-party providers | Requires approval and documentation in `DATA_SOURCES.md` |
 | CRM integration, email and LinkedIn outreach | Deferred per §24 |
@@ -845,6 +869,7 @@ implementation.
 | — | Lowest score band is named **Monitor** (0–24), not "Minimal" |
 | — | Scan All is in the MVP, as a batch of per-organization scans (`FR-SCAN-10`–`FR-SCAN-13`) |
 | — | Authentication is Clerk. Authorization and business roles stay in FastAPI |
+| — | **Decided 2026-09-28.** Build the P2 trend view (§16a): observed monthly counts by type, state, and vertical from stored signals. No forecasting |
 
 ### Still open
 

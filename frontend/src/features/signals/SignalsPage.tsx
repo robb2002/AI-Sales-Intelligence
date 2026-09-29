@@ -5,11 +5,13 @@ import { Link, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
 import { listSignals } from '../../api/signals'
 import { SignalCard } from '../../components/intelligence/SignalCard'
+import { Alert } from '../../components/ui/Alert'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { ErrorState } from '../../components/ui/ErrorState'
 import { Skeleton } from '../../components/ui/Skeleton'
-import type { SignalState, SignalType } from '../../types/api'
+import type { MarketRole, SignalState, SignalType } from '../../types/api'
 import {
+  ORG_TYPE_LABELS,
   SIGNAL_STATE_LABELS,
   SIGNAL_TYPE_LABELS,
   SIGNAL_TYPES,
@@ -25,20 +27,57 @@ export function SignalsPage() {
   const state = (params.get('state') as SignalState | null) || ''
   const q = params.get('q') ?? ''
   const organizationId = params.get('organization_id') ?? ''
+  const marketRole = (params.get('market_role') as MarketRole | null) || ''
+  const stateCode = params.get('state_code') ?? ''
+  const organizationType = params.get('organization_type') ?? ''
+  const dateFrom = params.get('date_from') ?? ''
+  const dateTo = params.get('date_to') ?? ''
+  const fromTrends = params.get('from_trends') === '1'
+  const monthFocus = params.get('month_focus') ?? ''
 
   const query = useQuery({
-    queryKey: ['signals', signalType, state, q, organizationId],
+    queryKey: [
+      'signals',
+      signalType,
+      state,
+      q,
+      organizationId,
+      marketRole,
+      stateCode,
+      organizationType,
+      dateFrom,
+      dateTo,
+    ],
     queryFn: () =>
       listSignals({
         organization_id: organizationId || undefined,
         signal_type: signalType ? [signalType] : undefined,
-        state: state ? [state] : ['validated', 'rejected', 'merged', 'detected', 'superseded'],
+        state: state
+          ? [state]
+          : fromTrends
+            ? ['validated']
+            : ['validated', 'rejected', 'merged', 'detected', 'superseded'],
+        market_role: marketRole ? [marketRole] : undefined,
+        state_code: stateCode ? [stateCode] : undefined,
+        organization_type: organizationType ? [organizationType] : undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
         q: q || undefined,
         limit: 50,
       }),
   })
 
-  const filtersActive = Boolean(signalType || state || q.trim() || organizationId)
+  const filtersActive = Boolean(
+    signalType ||
+      state ||
+      q.trim() ||
+      organizationId ||
+      marketRole ||
+      stateCode ||
+      organizationType ||
+      dateFrom ||
+      dateTo,
+  )
 
   const selectClass =
     'h-10 rounded-md border border-default bg-surface px-3 text-body text-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:outline-hidden'
@@ -102,6 +141,14 @@ export function SignalsPage() {
     )
   }, [filtersActive, query, setParams])
 
+  const trendsContextBits = [
+    marketRole === 'target' ? 'target organizations' : null,
+    signalType ? SIGNAL_TYPE_LABELS[signalType] : null,
+    stateCode ? `state ${stateCode}` : null,
+    organizationType ? ORG_TYPE_LABELS[organizationType] ?? organizationType : null,
+    dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : null,
+  ].filter(Boolean)
+
   return (
     <div className="space-y-6">
       <div>
@@ -109,6 +156,17 @@ export function SignalsPage() {
           Observed public signals with evidence. Facts stay separate from AI interpretation.
         </p>
       </div>
+
+      {fromTrends && (dateFrom || dateTo) && (
+        <Alert variant="info" title="Opened from Trends">
+          {monthFocus
+            ? `This list includes validated signals for the selected month (${monthFocus}). Undated signals of the same filters are also included, so the count can be higher than the month bar.`
+            : `This list matches the Trends filters${trendsContextBits.length ? ` (${trendsContextBits.join(' · ')})` : ''}. Undated signals stay in the list when a date range is set.`}{' '}
+          <Link to="/trends" className="font-medium text-navy-600 hover:underline">
+            Back to Trends
+          </Link>
+        </Alert>
+      )}
 
       <div className="flex flex-col gap-3 rounded-lg border border-default bg-surface p-4 shadow-xs lg:flex-row lg:items-end">
         <label className="min-w-0 flex-1">

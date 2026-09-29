@@ -9,6 +9,7 @@ import { OpportunitiesPage } from '../features/opportunities/OpportunitiesPage'
 import { OpportunityDetailPage } from '../features/opportunities/OpportunityDetailPage'
 import { SignalDetailPage } from '../features/signals/SignalDetailPage'
 import { SignalsPage } from '../features/signals/SignalsPage'
+import { TrendsPage } from '../features/trends/TrendsPage'
 import { NotFoundPage } from './NotFoundPage'
 import { RequireAuth } from './RequireAuth'
 
@@ -24,6 +25,7 @@ export function AppRoutes() {
         <Route path="signals/:signalId" element={<SignalDetailPage />} />
         <Route path="opportunities" element={<OpportunitiesPage />} />
         <Route path="opportunities/:opportunityId" element={<OpportunityDetailPage />} />
+        <Route path="trends" element={<TrendsPage />} />
         <Route path="competitors" element={<CompetitorsPage />} />
         <Route path="advisor" element={<AdvisorPage />} />
         <Route path="*" element={<NotFoundPage />} />

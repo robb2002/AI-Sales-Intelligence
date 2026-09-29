@@ -5,6 +5,7 @@ import { askAdvisor } from '../../api/advisor'
 import { isApiError } from '../../api/client'
 import { AiLabel, AiPanel } from '../intelligence/AiPanel'
 import { EvidenceList } from '../intelligence/EvidenceList'
+import { RichText } from '../intelligence/RichText'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { cn } from '../../lib/cn'
@@ -221,7 +222,26 @@ function AdvisorMessage({
 
   return (
     <AiPanel label="advisor">
-      <p className="max-w-[68ch] whitespace-pre-wrap text-body-lg">{turn.text}</p>
+      <div className="max-w-[68ch] space-y-2 text-body-lg text-on-ai">
+        {turn.text
+          .split(/\n+/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line, index) => {
+            const bullet = line.replace(/^•\s*/, "")
+            const isBullet = line.startsWith("•")
+            return (
+              <p key={index} className={isBullet ? "pl-0" : undefined}>
+                {isBullet ? (
+                  <span className="mr-1.5 text-indigo-300" aria-hidden>
+                    •
+                  </span>
+                ) : null}
+                <RichText text={bullet} strongClassName="font-semibold text-on-ai" />
+              </p>
+            )
+          })}
+      </div>
       {turn.evidence.length > 0 && (
         <div className="mt-4">
           <EvidenceList items={turn.evidence} heading="SOURCES" />

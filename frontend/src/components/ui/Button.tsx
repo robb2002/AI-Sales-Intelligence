@@ -48,7 +48,7 @@ export function Button({
       disabled={isDisabled}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap',
+        'inline-flex cursor-pointer items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap',
         'transition-colors duration-120 ease-out active:translate-y-px',
         'focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:outline-hidden',
         'disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0',

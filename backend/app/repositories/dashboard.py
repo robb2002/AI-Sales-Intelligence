@@ -55,43 +55,38 @@ async def opportunity_rows(
     return [(row[0], row[1], row[2], int(row[3])) for row in rows.all()]
 
 
-async def validated_counts(
-    session: AsyncSession, *, since: date
-) -> dict[str, tuple[int, int]]:
-    """Per signal type: (validated total, validated since `since`). One query."""
-    in_window = _signal_date() >= since
-    rows = await session.execute(
-        select(Signal.signal_type, func.count(), func.count().filter(in_window))
-        .where(Signal.state == "validated")
-        .group_by(Signal.signal_type)
-    )
-    return {signal_type: (int(total), int(recent)) for signal_type, total, recent in rows.all()}
-
-
-async def validated_counts_per_day(
-    session: AsyncSession, *, since: date, until: date
-) -> dict[date, int]:
+async def validated_counts_by_type_and_day(
+    session: AsyncSession,
+) -> list[tuple[str, date, int]]:
+    """(signal_type, signal date, count) for every validated signal. One query that serves both
+    the per-type totals and the per-day volume chart."""
     day = _signal_date()
     rows = await session.execute(
-        select(day, func.count())
-        .where(Signal.state == "validated", day >= since, day <= until)
-        .group_by(day)
+        select(Signal.signal_type, day, func.count())
+        .where(Signal.state == "validated")
+        .group_by(Signal.signal_type, day)
     )
-    return {row[0]: int(row[1]) for row in rows.all()}
+    return [(row[0], row[1], int(row[2])) for row in rows.all()]
 
 
 async def recent_validated_signals(
     session: AsyncSession, *, limit: int
-) -> list[tuple[Signal, str]]:
-    """Newest validated signals with their organization name. One query."""
+) -> list[tuple[Signal, str, int]]:
+    """Newest validated signals with their organization name and evidence count. One query."""
+    evidence_count = (
+        select(func.count())
+        .select_from(Evidence)
+        .where(Evidence.signal_id == Signal.signal_id)
+        .scalar_subquery()
+    )
     rows = await session.execute(
-        select(Signal, Organization.name)
+        select(Signal, Organization.name, evidence_count)
         .join(Organization, Organization.organization_id == Signal.organization_id)
         .where(Signal.state == "validated")
         .order_by(_signal_date().desc(), Signal.created_at.desc())
         .limit(limit)
     )
-    return [(row[0], row[1]) for row in rows.all()]
+    return [(row[0], row[1], int(row[2] or 0)) for row in rows.all()]
 
 
 async def recent_scan_runs(session: AsyncSession, *, limit: int = 200) -> list[ScanRun]:

@@ -124,6 +124,13 @@ Maps a Clerk identity to exactly one application role (`AUTHENTICATION.md` §9).
 
 **Constraints:** `organization_type` check. `market_role` check. `tracking_status` check. `ipeds_release` check when not null. `ipeds_attributes` is not evidence and is never given a signal type.
 
+**Delete (FR-ORG-11):** removing an `organizations` row cascades to that organization's
+`organization_sources`, `organization_peer_competitors`, `documents` (and their chunks),
+`signals` (and evidence), `opportunities` (and scores / opportunity_signals), `scan_runs`,
+`advisor_sessions`, and `ai_interactions` scoped to it. Shared `sources` registry rows are not
+cascaded. Peer-competitor **names** stored on other organizations are plain text and are not
+rewritten when a competitor organization row is deleted.
+
 `signal_count`, `opportunity_count`, and `last_scanned_at` in the API are queries, not stored counters.
 
 Country is not a column. The product is United States only (`AGENTS.md` §3).
@@ -279,7 +286,7 @@ One row per chunk. The embedding is a column on that row, not another table.
 | `retrieved_at` | timestamptz | no | Copied from the document |
 | `created_at` | timestamptz | no | |
 
-**N = 1536** for Azure `text-embedding-3-small` (**Updated 2026-09-25**, B1). Changing the embedding model/width requires a new migration and a full re-index.
+**N = 1536** for Azure `text-embedding-ada-002` (**Updated 2026-09-27**, B1). Changing the embedding model/width requires a new migration and a full re-index.
 
 **Indexes:** `(organization_id)`, `(document_id, chunk_index)` unique, `(signal_id)`.
 
@@ -596,7 +603,7 @@ The database holds the foreign keys and the checks above. These rules stay in th
 
 | # | Item | Status |
 |---|---|---|
-| B1 | Vector dimension N | **Updated 2026-09-25.** Azure OpenAI `text-embedding-3-small` via embedding adapter → `vector(1536)`. Chat remains Azure `interns-gpt-4.1`. Local/Groq embedding defaults removed. |
+| B1 | Vector dimension N | **Updated 2026-09-27.** Azure OpenAI `text-embedding-ada-002` via embedding adapter → `vector(1536)`. Chat remains Azure `interns-gpt-4.1`. Local/Groq embedding defaults removed. Indexing is background (same process), not on the scan critical path. |
 | B2 | ANN index | **Deferred.** Exact search until volume says otherwise |
 | B3 | `evidence_ids` as `uuid[]` | **Chosen** to avoid a junction table. The application must reject unknown ids. A junction is only worth adding if that check is skipped |
 | B4 | IPEDS column names inside `ipeds_attributes` | Still `NEEDS VERIFICATION` in `DATA_SOURCES.md` D5. The jsonb array can hold them without a schema change |

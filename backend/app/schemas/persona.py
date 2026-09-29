@@ -31,11 +31,13 @@ class PersonaBulletItem(BaseModel):
 
 
 class PersonaBlock(BaseModel):
-    type: Literal["heading", "paragraph", "bullets", "email"]
+    type: Literal["heading", "paragraph", "bullets", "table", "email"]
     text: str | None = None
     layer: str | None = None
     refs: list[int] = Field(default_factory=list)
     items: list[PersonaBulletItem] = Field(default_factory=list)
+    headers: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
     subject: str | None = None
     body: str | None = None
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, ExternalLink, Plus, Search } from 'lucide-react'
+import { Building2, ExternalLink, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
@@ -16,6 +16,7 @@ import { TrackingToggle } from '../../components/ui/TrackingToggle'
 import { ORG_TYPE_LABELS } from '../intelligence/labels'
 import { useDocumentTitle } from '../../lib/useDocumentTitle'
 import { useCurrentUser } from '../auth/useCurrentUser'
+import { DeleteOrganizationModal } from './DeleteOrganizationModal'
 import { OrganizationFormModal } from './OrganizationFormModal'
 
 const TYPE_LABELS = ORG_TYPE_LABELS
@@ -39,6 +40,11 @@ export function OrganizationsPage() {
   const organizationType = params.get('organization_type') ?? ''
   const trackingStatus = params.get('tracking_status') ?? ''
   const [formOpen, setFormOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{
+    organization_id: string
+    name: string
+    market_role: string
+  } | null>(null)
 
   const query = useQuery({
     queryKey: ['organizations', 'list', 'target', q, organizationType, trackingStatus],
@@ -110,7 +116,7 @@ export function OrganizationsPage() {
         <div>
           <h1 className="text-h2 font-semibold text-navy-700">Organizations</h1>
           <p className="mt-1 text-body-sm text-secondary">
-            Tracked US education organizations. Both roles can view; managers add and activate.
+            Tracked US education organizations. Both roles can view; managers add, activate, and delete.
           </p>
         </div>
         {isManager && (
@@ -272,26 +278,42 @@ export function OrganizationsPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {isManager && (
-                      <TrackingToggle
-                        size="sm"
-                        active={org.tracking_status === 'active'}
-                        loading={
-                          activateMutation.isPending &&
-                          activateMutation.variables?.id === org.organization_id
-                        }
-                        pendingStatus={
-                          activateMutation.isPending &&
-                          activateMutation.variables?.id === org.organization_id
-                            ? activateMutation.variables.status
-                            : null
-                        }
-                        onChange={(status) =>
-                          activateMutation.mutate({
-                            id: org.organization_id,
-                            status,
-                          })
-                        }
-                      />
+                      <>
+                        <TrackingToggle
+                          size="sm"
+                          active={org.tracking_status === 'active'}
+                          loading={
+                            activateMutation.isPending &&
+                            activateMutation.variables?.id === org.organization_id
+                          }
+                          pendingStatus={
+                            activateMutation.isPending &&
+                            activateMutation.variables?.id === org.organization_id
+                              ? activateMutation.variables.status
+                              : null
+                          }
+                          onChange={(status) =>
+                            activateMutation.mutate({
+                              id: org.organization_id,
+                              status,
+                            })
+                          }
+                        />
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          icon={Trash2}
+                          onClick={() =>
+                            setDeleteTarget({
+                              organization_id: org.organization_id,
+                              name: org.name,
+                              market_role: org.market_role,
+                            })
+                          }
+                        >
+                          Delete
+                        </Button>
+                      </>
                     )}
                     <Link
                       to={`/organizations/${org.organization_id}`}
@@ -316,6 +338,23 @@ export function OrganizationsPage() {
           void navigate(`/organizations/${id}`)
         }}
       />
+      {deleteTarget && (
+        <DeleteOrganizationModal
+          open
+          organizationId={deleteTarget.organization_id}
+          organizationName={deleteTarget.name}
+          marketRole={deleteTarget.market_role}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null)
+            void queryClient.invalidateQueries({ queryKey: ['organizations'] })
+            void queryClient.invalidateQueries({ queryKey: ['competitors'] })
+            void queryClient.invalidateQueries({ queryKey: ['signals'] })
+            void queryClient.invalidateQueries({ queryKey: ['opportunities'] })
+            void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+          }}
+        />
+      )}
     </div>
   )
 }

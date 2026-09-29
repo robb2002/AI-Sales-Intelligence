@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, replace
@@ -23,6 +24,35 @@ from app.services import signal_dedup
 logger = logging.getLogger("app.services.signal_extraction")
 
 _MAX_DOCS_PER_SCAN = 20
+# Model calls in flight per organization. Saving stays sequential and in document order.
+_PARALLEL_LLM_CALLS = 3
+
+# Closed cue list for target competitor_vendor validation (AI_RAG_DESIGN.md §5).
+# Must appear in the verbatim snippet; does not invent vendors.
+_VENDOR_EVIDENCE_CUES = (
+    "partnered",
+    "partnership",
+    "adopted",
+    "adopting",
+    "adoption",
+    "selected",
+    "selecting",
+    "implementing",
+    "implemented",
+    "implementation",
+    "contract with",
+    "contracted",
+    "powered by",
+    "using ",
+    "chose ",
+    "chosen",
+    "deployed",
+    "deploying",
+    "vendor",
+    "platform",
+    "proctoring",
+    "lms ",
+)
 
 
 @dataclass
@@ -74,6 +104,7 @@ async def extract_organization_signals(
     await session.commit()
 
     registry_names: dict[UUID, str] = {}
+    jobs: list[tuple[Document, str]] = []
     for doc in docs[:_MAX_DOCS_PER_SCAN]:
         if not doc.body_text or not doc.body_text.strip():
             result.skipped_docs += 1
@@ -84,10 +115,15 @@ async def extract_organization_signals(
         ):
             result.skipped_docs += 1
             continue
+        jobs.append((doc, await _source_name(session, org, doc, registry_names)))
+    # Release the pooled connection while the model works; the pooler allows few clients.
+    await session.commit()
 
-        source_name = await _source_name(session, org, doc, registry_names)
-        try:
-            candidates = await llm.extract_signals(
+    llm_slots = asyncio.Semaphore(_PARALLEL_LLM_CALLS)
+
+    async def extract(doc: Document, source_name: str) -> list[ExtractedSignalCandidate]:
+        async with llm_slots:
+            return await llm.extract_signals(
                 organization_name=org.name,
                 organization_id=str(org.organization_id),
                 source_name=source_name,
@@ -96,8 +132,21 @@ async def extract_organization_signals(
                 body_text=doc.body_text,
                 published_on=doc.published_on.isoformat() if doc.published_on else None,
             )
-        except Exception:
-            logger.exception("Signal extraction LLM failed for document %s", doc.document_id)
+
+    extractions = await asyncio.gather(
+        *(extract(doc, source_name) for doc, source_name in jobs), return_exceptions=True
+    )
+
+    # Persist one document at a time, in document order, exactly as a sequential run would.
+    for (doc, _), extracted in zip(jobs, extractions):
+        if isinstance(extracted, BaseException):
+            if not isinstance(extracted, Exception):
+                raise extracted
+            logger.error(
+                "Signal extraction LLM failed for document %s",
+                doc.document_id,
+                exc_info=extracted,
+            )
             scan.sources = list(scan.sources or []) + [
                 {
                     "source_name": "Signal extraction",
@@ -107,6 +156,14 @@ async def extract_organization_signals(
             ]
             await session.commit()
             continue
+        # An earlier document in this scan with the same body may have produced signals since
+        # the first check; the sequential rule skips it, so this one is skipped too.
+        if await signal_dedup.document_already_extracted(
+            session, organization_id=org.organization_id, content_hash=doc.content_hash
+        ):
+            result.skipped_docs += 1
+            continue
+        candidates = extracted
 
         result.processed_docs += 1
         if org.market_role == "competitor":
@@ -246,7 +303,20 @@ def _validate(
         return "URL_NOT_FROM_SOURCE"
     if not _about_organization(org=org, doc=doc):
         return "NOT_ABOUT_ORGANIZATION"
+    # Target campuses: competitor_vendor only when the snippet shows adoption/partnership cues.
+    # Competitor orgs already force this type for all of their own news — skip the cue check.
+    if (
+        org.market_role == "target"
+        and candidate.signal_type == "competitor_vendor"
+        and not _has_vendor_evidence_cue(candidate.snippet)
+    ):
+        return "NOT_VENDOR_EVIDENCE"
     return None
+
+
+def _has_vendor_evidence_cue(snippet: str) -> bool:
+    text = f" {snippet.lower()} "
+    return any(cue in text for cue in _VENDOR_EVIDENCE_CUES)
 
 
 def _about_organization(*, org: Organization, doc: Document) -> bool:

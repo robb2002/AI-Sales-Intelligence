@@ -30,7 +30,7 @@ No named organization website is listed yet. A website is added only after the c
 
 The primary purpose of the system is to monitor potential customer organizations in the U.S. education and EdTech market.
 
-The MVP may track 10 U.S. education organizations as TARGET organizations. Store them as configurable database records. Do not hard-code them in application code. Additional organizations can be added later without changing the application architecture. Site selection and validation stay in §5.1 and §5.2. This count of 10 sits inside the 10–20 range already stated in §5.1.
+The MVP may track 10 U.S. education organizations as TARGET organizations (grown to 17 on 2026-09-28, see below). Store them as configurable database records. Do not hard-code them in application code. Additional organizations can be added later without changing the application architecture. Site selection and validation stay in §5.1 and §5.2. This count of 10 sits inside the 10–20 range already stated in §5.1.
 
 **Decided 2026-09-23.** The build starts with two TARGET organizations. Add one only after a real SAM.gov notice or a validated page on that organization's own site is found. Add further organizations only after the signal-to-opportunity flow works for those two.
 
@@ -42,6 +42,27 @@ The system may also track a smaller number of EdTech and assessment companies as
 | COMPETITOR | Competitive intelligence |
 
 TARGET organizations are the primary focus of opportunity detection. COMPETITOR signals must not automatically be treated as customer opportunities.
+
+**Added 2026-09-28.** Seven more TARGET organizations, so the tracked set covers K-12 districts
+and colleges as well as universities (17 TARGET organizations, inside the §5.1 range of 10–20).
+Added through the manager create path (`API_CONTRACT.md` §6.4), which live-validates the official
+website (§5.2a checks: public access, `robots.txt`, same-domain redirects); the homepage title
+names the organization. All `active`:
+
+| Organization | Type | State | Official website |
+|---|---|---|---|
+| Houston Independent School District | `k12_district` | TX | `houstonisd.org` |
+| Denver Public Schools | `k12_district` | CO | `dpsk12.org` |
+| Gwinnett County Public Schools | `k12_district` | GA | `gcpsk12.org` |
+| Clark County School District | `k12_district` | NV | `ccsd.net` |
+| Miami Dade College | `college` | FL | `mdc.edu` |
+| Ivy Tech Community College | `college` | IN | `ivytech.edu` |
+| Austin Community College | `college` | TX | `austincc.edu` |
+
+Not added, because validation failed and the rules forbid working around it: Fairfax County Public
+Schools (`fcps.edu`, `robots.txt` disallows), Maricopa County Community College District
+(`maricopa.edu`, `robots.txt` disallows), Northern Virginia Community College (`nvcc.edu`, site did
+not respond). Recent public activity is confirmed by their first scan, not assumed.
 
 **Seeded 2026-09-26 (migration 0021).** Five COMPETITOR organizations, organization type `edtech_company`, tracked `active`: Honorlock (`honorlock.com`), Proctorio (`proctorio.com`), Meazure Learning (`meazurelearning.com`), Caveon (`caveon.com`), Questionmark (`questionmark.com`). They go through the same website discovery, collection, and extraction as a TARGET organization (§5). Their signals are always type `competitor_vendor`, they never produce an opportunity, and they are not sent to SAM.gov title searches so the application cap stays for TARGET organizations.
 
@@ -418,12 +439,16 @@ For the interim demo slice:
 3. From a news hub, the scan also collects up to `SCAN_NEWS_ARTICLES_PER_HUB` article pages (default 5) that the hub itself links to, on the same host, in the order the hub lists them. Article URLs come only from the fetched hub HTML. Nothing else is followed. This is the "documented next-page link on the same host" in §5.4, not a crawl.
 4. Every request follows §5.4: `robots.txt` first, at least five seconds between requests to the same host (longer if `crawl-delay` says so), the honest `HTTP_USER_AGENT`, same-domain redirects only. A 403 or 429 is recorded and not retried with another client or user agent. Different hosts run in parallel.
 5. **Updated 2026-09-24.** Scan Now is user-triggered and fetches live pages every time (`SCAN_REFRESH_HOURS` default 0), so a demo always shows the site as it is now. Within one scan each page is still fetched once, the five-second host gap still applies, and only one scan per organization runs at a time. A scheduled scan, if built, sets `SCAN_REFRESH_HOURS` to 24 to keep the "one fetch per page per daily scan" rule; a page collected (or found unreadable) inside that window is then reused.
+5a. **Updated 2026-09-27.** When the organization already has approved `organization_sources` rows, Scan Now reuses that register: it does not call the LLM rediscovery path and does not re-run first-time validation on those URLs. It still live-fetches each approved page (unless inside `SCAN_REFRESH_HOURS`) so extract → score → opportunity use current text. A fetch failure does not demote a previously approved row. Orgs with no approved rows still run full discovery + validation.
 6. A page whose text only appears after JavaScript runs is recorded as not collectable (`extraction_status` `failed`). Playwright is not used for it.
 7. `published_on` is set only when the page states a date (meta tags or structured data; the `<time>` tag on article pages). Otherwise it stays null. The scan never substitutes today's date.
 8. Each organization and URL has one current document. An unchanged page changes nothing. A changed page replaces the stored text in place, so the database shows what the site says now (`DATABASE_DESIGN.md` §6). An older version is kept only when stored evidence points at it.
 9. **Decided 2026-09-24.** Website collection does not insert rows into `sources`. That table holds only origins listed in this document (today `sam_gov`, `usaspending`, `ipeds`). The organization root URL is `organizations.website_url`. Approved pages are `organization_sources`. Website `documents` leave `source_id` null.
 
-**Decided 2026-09-24 (Scan Now multi-source).** The same Scan All / Scan Now run collects website pages and SAM.gov notices in parallel. SAM.gov uses one shared search for the batch (plus at most a few documented `title` searches when an org matched nothing), under the application cap of 10 requests / 24 hours. Notices are matched to `organizations.name` locally; unmatched notices are not stored. Matched notices become `documents` with `source_id` = SAM.gov, `organization_id` set, and `external_id` = `noticeId`. Description downloads are out of this slice (each is another request). USAspending and IPEDS are not part of this parallel loop yet.
+**Decided 2026-09-24 (Scan Now multi-source).** The same Scan All / Scan Now run collects website pages and SAM.gov notices in parallel. SAM.gov uses one shared search for the batch (plus at most a few documented `title` searches when an org matched nothing), under the application cap of 10 requests / 24 hours. Notices are matched to `organizations.name` locally; unmatched notices are not stored. Matched notices become `documents` with `source_id` = SAM.gov, `organization_id` set, and `external_id` = `noticeId`. Description downloads are out of this slice (each is another request).
+
+**Updated 2026-09-28 (USAspending in Scan Now).** After website + SAM.gov collection, the same org scan may call USAspending API v2 for that TARGET organization only: autocomplete must return exactly one recipient whose name is compatible with the org name; otherwise nothing is stored. Awards are loaded with `spending_by_award` (contracts and grants separately), filtered again to that exact recipient name, stored as `documents` with `source_id` = USAspending, `external_id` = `generated_internal_id` (or Award ID), and evidence URL `https://www.usaspending.gov` until a deep link is verified. Failures are recorded on the scan source list and never fail SAM.gov or website collection. At most one USAspending collect per organization per 24 hours. IPEDS remains outside the scan loop.
+
 
 ### 5.3 Approved website register
 
@@ -544,7 +569,7 @@ The smallest set that can still show the full workflow:
 1. **SAM.gov Get Opportunities API** for federal procurement and award notices. This is the structured source. One daily search, matched locally to the tracked organizations. The application cap is 10 requests per 24 hours until the issued key's quota is verified (§2.4). That cap is not SAM.gov's official quota.
 2. **Two official organization websites** for the first demo, each validated under §5.2 and written into §5.3. Leadership, technology, funding, and vendor signals come from those pages. SAM.gov stays the source for federal procurement notices. More sites, up to five, wait until the two-organization flow works.
 3. **NCES IPEDS** for postsecondary identity and context only. One file load. Not part of Scan Now. **Deferred for the first demo.**
-4. **USAspending** only for tracked organizations that resolve to one federal recipient. It adds historical award context. **Deferred for the first demo.**
+4. **USAspending** only for tracked TARGET organizations that resolve to one compatible federal recipient. It adds historical award context (`funding_budget`). Wired into Scan Now / Scan All after SAM.gov and websites (updated 2026-09-28).
 
 That is the whole set. No fifth source.
 

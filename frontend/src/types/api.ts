@@ -412,6 +412,13 @@ export type PersonaBlock =
       type: 'bullets'
       items: Array<{ text: string; layer?: PersonaLayer; refs?: number[] }>
     }
+  | {
+      type: 'table'
+      headers: string[]
+      rows: string[][]
+      layer?: string
+      refs?: number[]
+    }
   | { type: 'email'; subject: string; body: string }
 
 export type PersonaSourceKind =
@@ -479,4 +486,38 @@ export interface PeerCompetitorsResponse {
   search_query: string | null
   data_origin: 'live' | 'cached'
   peers: PeerCompetitor[]
+}
+
+export interface TrendsResponse {
+  generated_at: string
+  data_origin: DataOrigin
+  window: {
+    months: number
+    date_from: string
+    date_to: string
+  }
+  month_keys: string[]
+  totals: {
+    signals: number
+    undated: number
+    organizations: number
+  }
+  by_signal_type: Array<{
+    month: string
+    counts: Record<SignalType, number>
+  }>
+  by_state: Array<{
+    state_code: string | null
+    organizations: number
+    total: number
+    undated: number
+    by_month: number[]
+  }>
+  by_organization_type: Array<{
+    organization_type: string
+    organizations: number
+    total: number
+    undated: number
+    by_month: number[]
+  }>
 }

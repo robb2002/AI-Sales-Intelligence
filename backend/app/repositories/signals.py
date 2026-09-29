@@ -244,8 +244,15 @@ async def list_signals(
     q: str | None,
     limit: int,
     offset: int,
+    market_roles: list[str] | None = None,
+    state_codes: list[str] | None = None,
+    organization_types: list[str] | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> tuple[list[Signal], int]:
     from sqlalchemy import func as sa_func
+
+    from app.repositories.organizations import Organization
 
     filters = []
     if organization_id is not None:
@@ -260,8 +267,42 @@ async def list_signals(
         pattern = f"%{q.strip()}%"
         filters.append((Signal.title.ilike(pattern)) | (Signal.summary.ilike(pattern)))
 
-    count_q = select(sa_func.count()).select_from(Signal)
-    list_q = select(Signal)
+    needs_org_join = bool(market_roles or state_codes or organization_types)
+    if date_from is not None or date_to is not None:
+        # Dated signals must fall in range; undated signals stay (API_CONTRACT §7.1 / C5).
+        from sqlalchemy import and_, or_
+
+        dated_ok = []
+        if date_from is not None:
+            dated_ok.append(Signal.published_on >= date_from)
+        if date_to is not None:
+            dated_ok.append(Signal.published_on <= date_to)
+        filters.append(or_(Signal.published_on.is_(None), and_(*dated_ok)))
+
+    join_filters = []
+    if market_roles:
+        join_filters.append(Organization.market_role.in_(market_roles))
+    if state_codes:
+        join_filters.append(Organization.state_code.in_([code.upper() for code in state_codes]))
+    if organization_types:
+        join_filters.append(Organization.organization_type.in_(organization_types))
+
+    if needs_org_join:
+        count_q = (
+            select(sa_func.count())
+            .select_from(Signal)
+            .join(Organization, Organization.organization_id == Signal.organization_id)
+        )
+        list_q = select(Signal).join(
+            Organization, Organization.organization_id == Signal.organization_id
+        )
+        for clause in join_filters:
+            count_q = count_q.where(clause)
+            list_q = list_q.where(clause)
+    else:
+        count_q = select(sa_func.count()).select_from(Signal)
+        list_q = select(Signal)
+
     for f in filters:
         count_q = count_q.where(f)
         list_q = list_q.where(f)
@@ -272,7 +313,9 @@ async def list_signals(
             list_q.order_by(
                 Signal.published_on.desc().nullslast(),
                 Signal.created_at.desc(),
-            ).limit(limit).offset(offset)
+            )
+            .limit(limit)
+            .offset(offset)
         )
     ).scalars().all()
     return list(rows), total

@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
+import { ExternalLink, Sparkles } from 'lucide-react'
 import { Link, useParams } from 'react-router'
 import { isApiError } from '../../api/client'
 import { getOpportunity } from '../../api/opportunities'
 import { getSignal } from '../../api/signals'
-import { AiInlineNote } from '../../components/intelligence/AiPanel'
 import { EvidenceList } from '../../components/intelligence/EvidenceList'
 import { OpportunityCard } from '../../components/intelligence/OpportunityCard'
+import { ReadableInterpretation } from '../../components/intelligence/ReadableInterpretation'
 import {
   SignalStateBadge,
   SignalTypeBadge,
@@ -70,10 +71,11 @@ export function SignalDetailPage() {
   }
 
   const signal = query.data
+  const primaryEvidence = signal.evidence[0]
 
   return (
     <div className="mx-auto max-w-240 space-y-8">
-      <div>
+      <header className="space-y-4">
         <p className="text-caption text-secondary">
           <Link to="/signals" className="hover:underline">
             Signals
@@ -81,18 +83,55 @@ export function SignalDetailPage() {
           {' / '}
           <span className="text-primary">{signal.title}</span>
         </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-2">
           <SignalTypeBadge signalType={signal.signal_type} />
           <SignalStateBadge state={signal.state} />
+          {signal.data_origin === 'cached' ? (
+            <span className="text-caption text-muted">Cached data</span>
+          ) : null}
         </div>
-        <h2 className="mt-3 text-h1 text-primary">{signal.title}</h2>
-        <p className="mt-2 text-body-sm text-secondary">
-          <span className="font-medium text-navy-600">{signal.organization_name}</span>
+
+        <h1 className="text-h1 text-primary">{signal.title}</h1>
+
+        <p className="text-body-sm text-secondary">
+          <Link
+            to={`/organizations/${signal.organization_id}`}
+            className="font-medium text-navy-600 hover:underline"
+          >
+            {signal.organization_name}
+          </Link>
           {' · '}
           {formatSignalDate(signal.date, signal.date_status)}
-          {signal.data_origin === 'cached' ? ' · Cached data' : ''}
         </p>
-      </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to={`/advisor?organization_id=${signal.organization_id}`}
+            className="inline-flex h-8 items-center gap-2 rounded-md bg-indigo-600 px-3 text-body-sm font-medium text-inverse hover:bg-indigo-700 focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            <Sparkles aria-hidden className="size-4" strokeWidth={1.75} />
+            Ask Advisor
+          </Link>
+          <Link
+            to={`/signals?organization_id=${signal.organization_id}`}
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-default bg-surface px-3 text-body-sm font-medium text-navy-600 hover:bg-surface-sunken focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            More signals for this org
+          </Link>
+          {primaryEvidence?.source_url ? (
+            <a
+              href={primaryEvidence.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-default bg-surface px-3 text-body-sm font-medium text-navy-600 hover:bg-navy-50 focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              Open primary source
+              <ExternalLink aria-hidden className="size-3.5" strokeWidth={1.75} />
+            </a>
+          ) : null}
+        </div>
+      </header>
 
       {signal.state === 'rejected' && signal.rejection_reason && (
         <div className="rounded-lg border border-default bg-surface-sunken px-4 py-3">
@@ -102,12 +141,15 @@ export function SignalDetailPage() {
       )}
 
       <section className="rounded-lg border border-default bg-surface p-6 shadow-xs">
-        <p className="text-label text-secondary uppercase">What the source stated</p>
-        <p className="mt-3 max-w-[68ch] text-body-lg text-primary">{signal.summary}</p>
+        <p className="text-label text-secondary uppercase">Observed fact</p>
+        <p className="mt-1 text-caption text-muted">What the source stated — not an AI prediction</p>
+        <p className="mt-3 max-w-[68ch] text-body-lg leading-relaxed text-primary">
+          {signal.summary}
+        </p>
       </section>
 
       {signal.ai_summary?.text ? (
-        <AiInlineNote>{signal.ai_summary.text}</AiInlineNote>
+        <ReadableInterpretation text={signal.ai_summary.text} />
       ) : null}
 
       <section>
@@ -127,7 +169,8 @@ export function SignalDetailPage() {
         <div className="mt-3 space-y-3">
           {oppIds.length === 0 ? (
             <p className="rounded-lg border border-default bg-surface px-4 py-3 text-body-sm text-secondary">
-              This signal does not currently contribute to any potential opportunity.
+              This signal does not currently contribute to any potential opportunity. Another
+              related validated signal is usually needed before a potential opportunity is formed.
             </p>
           ) : oppQuery.isLoading ? (
             <Skeleton className="h-24 w-full rounded-lg" />
