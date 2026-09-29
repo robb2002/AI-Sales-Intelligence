@@ -11,6 +11,7 @@ from app.api.v1 import (
     organizations,
     peer_competitors,
     persona,
+    scan_all_trigger,
     scans,
     signals,
     trends,
@@ -32,3 +33,4 @@ protected_router.include_router(competitors.router)
 protected_router.include_router(peer_competitors.router)
 protected_router.include_router(persona.router)
 protected_router.include_router(trends.router)
+protected_router.include_router(scan_all_trigger.router)

@@ -3,8 +3,13 @@
 Advisor, scan extraction, and embeddings stay on Azure. This module is used only when
 PERSONA_GEMINI_API_KEY is set. On Gemini failure, falls back to Azure so demos stay up.
 
-Latency: prefer models.generate_content (fast JSON path). interactions.create is tried only
-when generate_content fails, and Azure is the last resort — never wait on long 503 retries.
+Latency (2026-09-29): a second Gemini call (`interactions.create`) used to be tried after
+`generate_content` failed. In practice it always failed too (free-tier rate limit or the same
+"high demand" 503), so every Gemini failure was paying for two slow calls, each with its own
+client-level retries, before ever reaching the working Azure fallback — well over a minute in
+total. `generate_content` is now the only Gemini attempt, and the whole attempt is bounded by
+`_GENERATE_TIMEOUT_SECONDS` so a stuck/overloaded Gemini falls back to Azure quickly instead of
+however long the SDK's own retry/backoff takes.
 """
 
 from __future__ import annotations
@@ -28,6 +33,10 @@ logger = logging.getLogger(__name__)
 # Keep Persona snappy; long answers still fit in ~3–8 blocks.
 _MAX_OUTPUT_TOKENS = 1400
 _HTTP_TIMEOUT_MS = 45_000
+# Ceiling on the whole Gemini attempt (including the client's own internal retries) before
+# giving up and falling back to Azure. Comfortably covers a normal response; well under the
+# multi-minute worst case an overloaded/rate-limited model can otherwise cause.
+_GENERATE_TIMEOUT_SECONDS = 20.0
 
 
 class GeminiPersonaAdapter:
@@ -65,11 +74,18 @@ class GeminiPersonaAdapter:
             scope_note=scope_note,
         )
         try:
-            content = await asyncio.to_thread(self._generate, user)
+            content = await asyncio.wait_for(
+                asyncio.to_thread(self._generate, user), timeout=_GENERATE_TIMEOUT_SECONDS
+            )
             parsed = parse_persona_answer(content)
             if parsed.get("blocks"):
                 return parsed
             logger.warning("Persona Gemini returned no blocks; trying Azure fallback")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Persona Gemini timed out after %ss; trying Azure fallback",
+                _GENERATE_TIMEOUT_SECONDS,
+            )
         except Exception:
             logger.exception("Persona Gemini failed; trying Azure fallback")
 
@@ -86,59 +102,16 @@ class GeminiPersonaAdapter:
     def _generate(self, user: str) -> str:
         model = self._settings.persona_gemini_model.strip()
         prompt = f"{PERSONA_SYSTEM}\n\n{user}"
-        # Fast path first: generate_content with JSON mime (avoids experimental Interactions
-        # retries that can stall for minutes on 503).
-        try:
-            response = self._client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=_MAX_OUTPUT_TOKENS,
-                    temperature=0.4,
-                    response_mime_type="application/json",
-                ),
-            )
-            text = _generate_content_text(response)
-            if text.strip():
-                return text
-            logger.warning("Persona Gemini generate_content empty; trying interactions.create")
-        except Exception:
-            logger.exception(
-                "Persona Gemini generate_content failed; trying interactions.create once"
-            )
-        interaction = self._client.interactions.create(model=model, input=prompt)
-        return _interaction_text(interaction)
-
-
-def _interaction_text(interaction: Any) -> str:
-    for attr in ("output_text", "text"):
-        value = getattr(interaction, attr, None)
-        if isinstance(value, str) and value.strip():
-            return value
-    outputs = getattr(interaction, "outputs", None) or getattr(interaction, "output", None)
-    if isinstance(outputs, list):
-        parts: list[str] = []
-        for item in outputs:
-            if isinstance(item, str) and item.strip():
-                parts.append(item)
-                continue
-            text = getattr(item, "text", None)
-            if isinstance(text, str) and text.strip():
-                parts.append(text)
-                continue
-            if isinstance(item, dict):
-                t = item.get("text")
-                if isinstance(t, str) and t.strip():
-                    parts.append(t)
-                    continue
-                content = item.get("content")
-                if isinstance(content, str) and content.strip():
-                    parts.append(content)
-        if parts:
-            return "\n".join(parts)
-    if isinstance(outputs, str) and outputs.strip():
-        return outputs
-    return str(interaction) if interaction is not None else ""
+        response = self._client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                max_output_tokens=_MAX_OUTPUT_TOKENS,
+                temperature=0.4,
+                response_mime_type="application/json",
+            ),
+        )
+        return _generate_content_text(response)
 
 
 def _generate_content_text(response: Any) -> str:

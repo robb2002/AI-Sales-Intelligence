@@ -24,6 +24,8 @@ export type OrganizationPatchBody = {
   state_code?: string | null
   website_url?: string
   tracking_status?: 'active' | 'inactive'
+  /** ISO timestamp strictly in the future, or null to clear an existing schedule. */
+  scheduled_scan_at?: string | null
 }
 
 export function listOrganizations(params?: {

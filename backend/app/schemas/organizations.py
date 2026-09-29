@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -57,6 +57,8 @@ class OrganizationUpdate(BaseModel):
     state_code: str | None = None
     website_url: str | None = Field(default=None, min_length=1, max_length=500)
     tracking_status: TrackingStatus | None = None
+    # Manager-set, one-time future UTC trigger. Send null to clear an existing schedule.
+    scheduled_scan_at: datetime | None = None
 
     @field_validator("name", "website_url")
     @classmethod
@@ -79,6 +81,16 @@ class OrganizationUpdate(BaseModel):
         if len(trimmed) != 2 or not trimmed.isalpha():
             raise ValueError("must be a two-letter USPS code")
         return trimmed
+
+    @field_validator("scheduled_scan_at")
+    @classmethod
+    def must_be_future(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        if aware <= datetime.now(timezone.utc):
+            raise ValueError("must be a future date and time")
+        return aware
 
 
 class OrganizationIpeds(BaseModel):
@@ -105,6 +117,7 @@ class OrganizationResponse(BaseModel):
     data_origin: Literal["live"] = "live"
     ipeds: OrganizationIpeds | None = None
     last_scan: dict | None = None
+    scheduled_scan_at: datetime | None = None
 
 
 class OrganizationSourceCreate(BaseModel):

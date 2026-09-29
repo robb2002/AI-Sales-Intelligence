@@ -26,6 +26,7 @@ Primary keys are `uuid`. Timestamps are `timestamptz` stored in UTC. Closed sets
 | `organizations` | The 10–20 tracked institutions, plus IPEDS reference on the same row |
 | `sources` | Approved origins from `DATA_SOURCES.md` |
 | `organization_peer_competitors` | The saved top 5 peer competitors of one organization from the last Update (added 2026-09-26) |
+| `scan_all_trigger` | Singleton row: the manager-set, one-time future Scan All schedule (added 2026-09-29; migration 0024) |
 | `documents` | Raw fetched content, URL, hash, retrieval time |
 | `document_chunks` | Chunk text, citation metadata, and the embedding |
 | `signals` | One signal, including a cluster's surviving row and rejected rows |
@@ -117,6 +118,7 @@ Maps a Clerk identity to exactly one application role (`AUTHENTICATION.md` §9).
 | `ipeds_attributes` | jsonb | yes | Array of `{key, label, value}` from the loaded file only |
 | `briefing_text` | text | yes | Organization briefing. Null when none |
 | `briefing_status` | text | yes | `ready` or `unavailable` |
+| `scheduled_scan_at` | timestamptz | yes | Manager-set, one-time future trigger for this organization's scan (added 2026-09-29; migration 0023). Cleared once the scan it triggers has started. Independent of the daily Scan All scheduler and `SCHEDULER_ENABLED` |
 | `created_at` | timestamptz | no | |
 | `updated_at` | timestamptz | no | |
 

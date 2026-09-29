@@ -57,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        from app.scheduled_scan_trigger import create_scheduled_scan_checker
         from app.scheduler import create_scheduler
         from app.services.indexing_worker import sweep_unindexed_documents
         from app.services.scans import mark_interrupted_on_startup
@@ -79,10 +80,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     }
                 },
             )
+        # Always on, independent of SCHEDULER_ENABLED: fires a manager's per-organization
+        # one-time scheduled scan (organizations.scheduled_scan_at) when its time arrives.
+        scheduled_scan_checker = create_scheduled_scan_checker(settings, session_factory)
+        scheduled_scan_checker.start()
         yield
         warm_up.cancel()
         if scheduler is not None:
             scheduler.shutdown(wait=False)
+        scheduled_scan_checker.shutdown(wait=False)
         await engine.dispose()
 
     is_local = settings.app_env == "local"

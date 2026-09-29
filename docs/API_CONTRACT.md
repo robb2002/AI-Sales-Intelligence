@@ -593,12 +593,15 @@ Sets `status` to `rejected` so later scans do not collect the page. Does not del
 | `state_code` | Two-letter USPS code, or `null` to clear |
 | `website_url` | When present and different from the stored value, re-run the §6.4 live website validation and store the final URL |
 | `tracking_status` | `active` or `inactive` |
+| `scheduled_scan_at` | ISO timestamp strictly after the current time, or `null` to clear an existing schedule (added 2026-09-29) |
 
-**200:** organization detail (§5.5).
+**200:** organization detail (§5.5), which now includes `scheduled_scan_at` (`null` when unset).
 
 **Errors:** 400, 401, 403 `INSUFFICIENT_PERMISSION` for `SALES_REP`, 404, 409 on duplicate `website_url`.
 
 Deactivating tracking (`tracking_status = inactive`) keeps history and excludes the organization from Scan All. Hard delete is §6.5a.
+
+**Scheduled scan (added 2026-09-29).** A manager may set `scheduled_scan_at` to one future UTC date/time on a `target` or `competitor` organization (client UI: Edit organization > Schedule tab, shown only when the signed-in user's role from `GET /api/v1/me` is `SALES_MANAGER`). A past or present value is rejected (400). An always-on background check (independent of `SCHEDULER_ENABLED`, `DATA_SOURCES.md`/`TECHNICAL_PRD.md` §"Scheduled scan check") starts that organization's Scan Now once the time arrives and clears the field, so it fires exactly once. If the organization is inactive, deleted, or already mid-scan when the time arrives, the field is still cleared and the scan is silently skipped, matching the fail-soft pattern used elsewhere. Both roles may read the field; only a manager may set or clear it.
 
 ### 6.5a Delete organization (added 2026-09-28)
 
@@ -802,6 +805,32 @@ Any other `scope` is 400. There is no body that accepts an arbitrary URL or an u
 Each id is a scan for one **active** organization. Organizations that already have an active scan contribute that existing scan id. The batch does not start a second run for them.
 
 **Errors:** 401, 403, 429 `SCAN_RATE_LIMITED`.
+
+### 9.2a Scan All schedule (added 2026-09-29)
+
+A manager-set, one-time future UTC trigger for Scan All, distinct from the daily `SCHEDULER_ENABLED`
+job in `TECHNICAL_PRD.md` §9. There is exactly one schedule at a time (portfolio scope, not
+per-organization — that is §6.5's `scheduled_scan_at`).
+
+| | |
+|---|---|
+| Read | `GET /api/v1/scan-all-schedule` |
+| Update | `PATCH /api/v1/scan-all-schedule` |
+| Auth | Bearer |
+| Roles | Read: both. Update: `SALES_MANAGER` only |
+| Body (PATCH) | `{ "scheduled_at": "<ISO timestamp>" }` or `{ "scheduled_at": null }` to clear |
+
+**200 (both)**
+
+```json
+{ "scheduled_at": "<ISO timestamp or null>" }
+```
+
+A past or present `scheduled_at` is rejected (400). An always-on background check (independent of
+`SCHEDULER_ENABLED`) starts Scan All (`trigger: "scheduled"`) once the time arrives and clears the
+field, so it fires exactly once.
+
+**Errors:** 400, 401, 403 `INSUFFICIENT_PERMISSION` for `SALES_REP` on PATCH.
 
 ### 9.3 Get one scan
 

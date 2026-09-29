@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, String, Text, Uuid, func, text
+from sqlalchemy import CheckConstraint, DateTime, String, Text, Uuid, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.repositories.base import Base
@@ -60,7 +61,21 @@ class Organization(Base):
     ipeds_attributes: Mapped[object | None] = mapped_column(JSONB)
     briefing_text: Mapped[str | None] = mapped_column(Text)
     briefing_status: Mapped[str | None] = mapped_column(Text)
+    # Manager-set, one-time future UTC trigger (Edit organization > Schedule tab). Cleared once
+    # the scan it triggers has been started. Independent of the daily Scan All scheduler.
+    scheduled_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+async def list_due_scheduled_scans(session: AsyncSession, *, now: datetime) -> list["Organization"]:
+    """Organizations whose manager-set scheduled_scan_at has arrived, any tracking_status."""
+    rows = await session.execute(
+        select(Organization).where(
+            Organization.scheduled_scan_at.is_not(None),
+            Organization.scheduled_scan_at <= now,
+        )
+    )
+    return list(rows.scalars().all())

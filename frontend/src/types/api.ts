@@ -66,6 +66,8 @@ export interface OrganizationSummary {
   opportunity_count: number
   last_scanned_at: string | null
   data_origin?: DataOrigin
+  /** Manager-set, one-time future UTC trigger for this organization's scan. Null when unset. */
+  scheduled_scan_at: string | null
 }
 
 export interface OrganizationIpeds {
@@ -88,6 +90,11 @@ export interface OrganizationSummaryPage {
   total: number
   limit: number
   offset: number
+}
+
+/** Manager-set, one-time future UTC trigger for Scan All (portfolio scope). */
+export interface ScanAllTriggerResponse {
+  scheduled_at: string | null
 }
 
 export interface OrganizationSourceItem {
