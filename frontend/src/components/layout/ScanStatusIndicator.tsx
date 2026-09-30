@@ -24,8 +24,9 @@ export function ScanStatusIndicator() {
   const { data } = useQuery({
     queryKey: ['dashboard'],
     queryFn: getDashboard,
-    staleTime: 60_000,
-    refetchInterval: (query) => (query.state.data?.scan_status.running ? 5_000 : false),
+    staleTime: 10_000,
+    // Keep the header chip current for scheduler-started runs without a full page refresh.
+    refetchInterval: (query) => (query.state.data?.scan_status.running ? 3_000 : 5_000),
   })
 
   const scan = data?.scan_status

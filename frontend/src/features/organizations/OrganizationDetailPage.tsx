@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, ExternalLink, Pencil, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { isApiError } from '../../api/client'
 import { getScan } from '../../api/scans'
@@ -74,23 +74,33 @@ export function OrganizationDetailPage() {
   const [pageCategory, setPageCategory] = useState('technology')
   const [pageTitle, setPageTitle] = useState('')
   const [sourceError, setSourceError] = useState<string | null>(null)
+  // After a scheduled time fires, the API clears scheduled_scan_at before last_scan may show
+  // running. Keep polling through that window so progress appears without a manual refresh.
+  const watchScanUntilRef = useRef(0)
 
   const orgQuery = useQuery({
     queryKey: ['organizations', organizationId],
     queryFn: () => getOrganization(organizationId),
     enabled: Boolean(organizationId),
-    // Keep this page live without a manual reload for two cases the UI can't otherwise learn
-    // about on its own: (a) a manager's scheduled trigger is armed and waiting to fire, and
-    // (b) a scan — started by that trigger, by another tab, or by Scan All — is in flight for
-    // this organization. 15s while only watching a future trigger; 5s (matching the existing
-    // manual Scan Now poll elsewhere on this page) once a scan is actually running.
     refetchInterval: (query) => {
       const data = query.state.data as OrganizationDetail | undefined
-      if (!data) return false
+      if (!data) return 5_000
       const scanStatus = data.last_scan?.status
-      if (scanStatus === 'queued' || scanStatus === 'running') return 5000
-      if (data.scheduled_scan_at) return 15000
-      return false
+      if (scanStatus === 'queued' || scanStatus === 'running') return 3_000
+
+      if (data.scheduled_scan_at) {
+        const when = new Date(data.scheduled_scan_at).getTime()
+        if (Number.isFinite(when)) {
+          watchScanUntilRef.current = Math.max(watchScanUntilRef.current, when + 180_000)
+          // From 2 minutes before fire through the post-clear watch window: poll quickly.
+          if (when - Date.now() <= 120_000) return 3_000
+        }
+        return 5_000
+      }
+
+      if (Date.now() < watchScanUntilRef.current) return 3_000
+      // Light always-on poll while this page is open (catches Scan All / schedule edge cases).
+      return 5_000
     },
   })
 
@@ -102,14 +112,23 @@ export function OrganizationDetailPage() {
 
   useDocumentTitle(orgQuery.data?.name ?? 'Organization')
 
+  // Scheduler / Scan All / another tab can start a run without this page calling Scan Now.
+  // Attach to org.last_scan so stage progress polls without requiring a refresh click.
+  useEffect(() => {
+    const last = orgQuery.data?.last_scan
+    if (!last) return
+    if (last.status !== 'queued' && last.status !== 'running') return
+    if (scanId === last.scan_id) return
+    setScanId(last.scan_id)
+  }, [orgQuery.data?.last_scan, scanId])
+
   const scanQuery = useQuery({
     queryKey: ['scans', scanId],
     queryFn: () => getScan(scanId!),
     enabled: Boolean(scanId),
     refetchInterval: (q) => {
       const status = (q.state.data as ScanDetail | undefined)?.status
-      // 5s matches dashboard batch polling; avoids auth/DB pressure during long scans.
-      return status === 'queued' || status === 'running' ? 5000 : false
+      return status === 'queued' || status === 'running' ? 3_000 : false
     },
   })
 
@@ -199,6 +218,7 @@ export function OrganizationDetailPage() {
         error_detail: null,
         changes: {},
       } satisfies ScanDetail)
+      void queryClient.invalidateQueries({ queryKey: ['organizations', organizationId] })
     },
     onError: (err) => {
       setScanError(isApiError(err) ? err.message : 'Scan could not be started.')
@@ -227,14 +247,17 @@ export function OrganizationDetailPage() {
 
   const org = orgQuery.data
   const sources = sourcesQuery.data?.data ?? []
-  const scanStatus = scanQuery.data?.status
-  const scanRunning = scanStatus === 'queued' || scanStatus === 'running'
+  const lastScanStatus = org.last_scan?.status
+  const lastScanRunning = lastScanStatus === 'queued' || lastScanStatus === 'running'
+  const scanStatus = scanQuery.data?.status ?? (lastScanRunning ? lastScanStatus : undefined)
+  const scanRunning = scanStatus === 'queued' || scanStatus === 'running' || lastScanRunning
   const scanBusy = scanMutation.isPending || scanRunning
   const scanDoneOk =
     !scanBusy && (scanStatus === 'succeeded' || scanStatus === 'partial') && scanQuery.data
   const scanOutcome = scanDoneOk ? scanOutcomeSummary(scanQuery.data) : null
   const orgActive = org.tracking_status === 'active'
   const websiteHost = hostLabel(org.website_url)
+  const scanStage = scanQuery.data?.stage ?? org.last_scan?.stage ?? 'starting'
 
   return (
     <div className="space-y-6">
@@ -336,7 +359,7 @@ export function OrganizationDetailPage() {
               disabled={!orgActive || scanBusy}
               onClick={() => scanMutation.mutate()}
             >
-              Scan Now
+              {scanRunning ? 'Scan in progress' : 'Scan Now'}
             </Button>
           </div>
         </div>
@@ -359,10 +382,10 @@ export function OrganizationDetailPage() {
           Contacting the server. Progress will appear here in a moment.
         </Alert>
       )}
-      {scanRunning && (
+      {scanRunning && !scanMutation.isPending && (
         <Alert variant="info" title="Scan in progress">
-          Stage: {scanQuery.data?.stage ?? 'starting'}. You can leave this page; progress continues on
-          the server.
+          Stage: <span className="font-medium text-primary">{scanStage}</span>. You can leave this
+          page; progress continues on the server.
         </Alert>
       )}
       {scanOutcome && (

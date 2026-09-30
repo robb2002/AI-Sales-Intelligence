@@ -28,7 +28,9 @@ logger = logging.getLogger("app.scheduled_scan_trigger")
 
 JOB_ID = "organization_scheduled_scan_trigger"
 SCAN_ALL_JOB_ID = "scan_all_scheduled_trigger"
-CHECK_INTERVAL_SECONDS = 60
+# How often we look for due one-time schedules. Lower = UI shows progress sooner after the
+# chosen clock time (UI already polls every few seconds). Keep >= 10s so we do not hammer DB.
+CHECK_INTERVAL_SECONDS = 15
 
 
 def create_scheduled_scan_checker(
